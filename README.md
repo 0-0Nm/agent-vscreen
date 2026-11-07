@@ -9,11 +9,13 @@ Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你
 手机上的任何 agent 都可以调用它：带终端的 agent 用命令行 `vscreen`，支持 MCP 的用 MCP，自己写代码的用 HTTP。
 
 <p align="center">
-  <img src="docs/demo.gif" width="300" alt="agent 在后台副屏里用 Chrome 做数独，右上角的悬浮窗实时显示">
-  &nbsp;&nbsp;
-  <img src="docs/home.png" width="300" alt="Agent-VScreen 首页">
+  <img src="docs/game.gif" width="260" alt="agent 在后台副屏里玩洛克王国，用摇杆走动、拖动镜头、处理战斗弹窗">
+  &nbsp;
+  <img src="docs/demo.gif" width="260" alt="agent 在后台副屏里用 Chrome 做数独，右上角的悬浮窗实时显示">
+  &nbsp;
+  <img src="docs/home.png" width="260" alt="Agent-VScreen 首页">
 </p>
-<p align="center"><sub>左：一个 agent 在后台副屏里打开 Chrome 解数独，用户的主屏仍是聊天界面，右上角悬浮窗实时显示副屏（8 倍速）。右：App 首页。</sub></p>
+<p align="center"><sub>左：agent 在后台副屏里玩洛克王国，完成横屏启动、摇杆长按走动、拖动镜头和战斗弹窗操作（2.6 倍速）。中：agent 在后台副屏里打开 Chrome 解数独，用户的主屏仍是聊天界面，右上角悬浮窗实时显示副屏（8 倍速）。右：App 首页。</sub></p>
 
 - 版本：1.1.5（versionCode 7）
 - 包名：`com.kilon.agentvscreen`
