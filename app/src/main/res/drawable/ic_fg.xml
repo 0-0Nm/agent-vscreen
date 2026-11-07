@@ -1,0 +1,23 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- the phone you hold -->
+    <path android:pathData="M40,24h20a8,8 0,0 1,8 8v44a8,8 0,0 1,-8 8h-20a8,8 0,0 1,-8 -8v-44a8,8 0,0 1,8 -8z" android:fillColor="#FFFFFF" android:fillAlpha="0.10" android:strokeColor="#FFFFFF" android:strokeAlpha="0.7" android:strokeWidth="2.4"/>
+    <path android:pathData="M45,78h10" android:strokeColor="#FFFFFF" android:strokeAlpha="0.7" android:strokeWidth="2" android:strokeLineCap="round"/>
+    <!-- the floating window showing the background screen, rainbow border while the agent works -->
+    <path android:pathData="M58,34h14a6,6 0,0 1,6 6v24a6,6 0,0 1,-6 6h-14a6,6 0,0 1,-6 -6v-24a6,6 0,0 1,6 -6z" android:fillColor="#FF0E1220" android:strokeWidth="3.2">
+        <aapt:attr name="android:strokeColor">
+            <gradient android:type="linear" android:startX="52" android:startY="34" android:endX="78" android:endY="70">
+                <item android:offset="0" android:color="#FFFF5F6D"/>
+                <item android:offset="0.2" android:color="#FFFFB347"/>
+                <item android:offset="0.4" android:color="#FF4ADE80"/>
+                <item android:offset="0.6" android:color="#FF22D3EE"/>
+                <item android:offset="0.8" android:color="#FF6C7BFF"/>
+                <item android:offset="1" android:color="#FFC06CFF"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M61.5,65h7" android:strokeColor="#FFFFFF" android:strokeAlpha="0.8" android:strokeWidth="1.6" android:strokeLineCap="round"/>
+    <path android:pathData="M58.5,40h13.0a1.5,1.5 0,0 1,1.5 1.5v0.0a1.5,1.5 0,0 1,-1.5 1.5h-13.0a1.5,1.5 0,0 1,-1.5 -1.5v-0.0a1.5,1.5 0,0 1,1.5 -1.5z" android:fillColor="#FF7CE7FF" android:fillAlpha="0.75"/>
+    <path android:pathData="M58.5,46h8.0a1.5,1.5 0,0 1,1.5 1.5v0.0a1.5,1.5 0,0 1,-1.5 1.5h-8.0a1.5,1.5 0,0 1,-1.5 -1.5v-0.0a1.5,1.5 0,0 1,1.5 -1.5z" android:fillColor="#FFFFFFFF" android:fillAlpha="0.45"/>
+    <path android:pathData="M58.5,52h10.0a1.5,1.5 0,0 1,1.5 1.5v0.0a1.5,1.5 0,0 1,-1.5 1.5h-10.0a1.5,1.5 0,0 1,-1.5 -1.5v-0.0a1.5,1.5 0,0 1,1.5 -1.5z" android:fillColor="#FFFFFFFF" android:fillAlpha="0.45"/>
+</vector>

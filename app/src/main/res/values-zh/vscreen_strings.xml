@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- [vscreen] 后台操作 -->
+    <string name="settings_section_session">会话</string>
+    <string name="vscreen_title">后台操作</string>
+    <string name="vscreen_enable">启用后台操作</string>
+    <string name="vscreen_enable_footer">默认关闭。启用不等于连接就绪，也不会自动开启无障碍、无线调试或授予权限。关闭后不会转到前台继续点击。</string>
+    <string name="vscreen_enhanced">增强规划（实验）</string>
+    <string name="vscreen_enhanced_footer">自动汇总执行结果并优化规划时机。默认关闭，下一次发送、继续或重试任务生效；当前任务保持原模式。关闭不会撤销已执行动作，也不会清除聊天历史。</string>
+    <string name="vscreen_section_connection">连接与权限</string>
+    <string name="vscreen_connection">后台连接</string>
+    <string name="vscreen_display_id">显示 ID</string>
+    <string name="vscreen_privilege">特权连接 / 授权</string>
+    <string name="vscreen_accessibility">无障碍服务</string>
+    <string name="vscreen_connect">连接</string>
+    <string name="vscreen_open_permissions">打开权限设置</string>
+    <string name="vscreen_screen_size">画面尺寸</string>
+    <string name="vscreen_screen_size_auto">自动适配主屏</string>
+    <string name="vscreen_screen_size_footer">每次建屏自动使用主屏尺寸和密度。正常结束或停止聊天回答后释放画面、保留连接，下次打开后台应用自动建屏。设置中的停止并释放、关闭功能或连接失效仍需明确重连。</string>
+    <string name="vscreen_section_preview">预览</string>
+    <string name="vscreen_show_preview">显示预览</string>
+    <string name="vscreen_show_preview_hint">连接就绪后显示预览。</string>
+    <string name="vscreen_preview_footer">在本页和所属聊天页显示画面，聊天小屏可拖动、双指缩放、收起和放大。收起或离开页面停止预览刷新，但任务中的读屏仍可用。任务结束后释放画面；查询状态或查看小窗不会重新建屏。不需要系统悬浮窗权限。</string>
+    <string name="vscreen_stop_release">停止并释放</string>
+    <string name="vscreen_stop_release_footer">停止并释放会终止后台操作并释放显示资源，不会转到前台继续点击。若要关闭功能，请使用顶部开关。</string>
+    <string name="vscreen_conn_disconnected">未连接</string>
+    <string name="vscreen_conn_connecting">连接中</string>
+    <string name="vscreen_conn_ready">已连接</string>
+    <string name="vscreen_conn_error">异常</string>
+    <string name="vscreen_not_created">未创建</string>
+    <string name="vscreen_priv_not_installed">未安装</string>
+    <string name="vscreen_priv_not_running">服务未启动</string>
+    <string name="vscreen_priv_not_authorized">已连接未授权</string>
+    <string name="vscreen_priv_ready">已连接且已授权</string>
+    <string name="vscreen_a11y_connected">服务已连接</string>
+    <string name="vscreen_a11y_disconnected">服务未连接</string>
+    <string name="vscreen_status_waiting">待连接</string>
+    <string name="vscreen_status_ready_idle">已就绪，下次后台任务自动建屏</string>
+    <string name="vscreen_status_ready_screen">已就绪，副屏运行中</string>
+    <string name="vscreen_status_need_reconnect">需要重新连接</string>
+    <string name="vscreen_status_disabled">未启用</string>
+    <string name="vscreen_takeover">接管</string>
+    <string name="vscreen_hand_back">交还</string>
+    <string name="vscreen_operating">操作中</string>
+    <string name="vscreen_taken_over">你在操作</string>
+    <string name="vscreen_pill_sleeping">已连接，画面休眠</string>
+    <string name="vscreen_loading">正在加载…</string>
+    <string name="vscreen_collapse">收起</string>
+    <string name="vscreen_expand">展开</string>
+    <string name="vscreen_back">返回</string>
+    <string name="vscreen_no_preview">当前没有副屏画面</string>
+    <string name="vscreen_pill_idle">空闲，副屏保留中</string>
+    <string name="vscreen_blank_frame">副屏暂时没有画面</string>
+    <string name="vscreen_no_app">副屏上没有运行的应用（空闲）</string>
+    <!-- full-screen view -->
+    <string name="vscreen_fullscreen">全屏</string>
+    <string name="vscreen_exit_fullscreen">退出全屏</string>
+    <string name="vscreen_fs_title">后台屏幕</string>
+    <string name="vscreen_fs_status_you">你在操作 · Agent 暂停等待</string>
+    <string name="vscreen_fs_status_standby">Agent 待命</string>
+    <string name="vscreen_fs_takeover_hint">接管后可以直接点按和输入</string>
+    <string name="vscreen_fs_keyboard">输入文字</string>
+    <string name="vscreen_fs_type_hint">输入到副屏当前的输入框</string>
+    <string name="vscreen_fs_send">发送</string>
+    <string name="vscreen_fs_enter">回车</string>
+    <string name="vscreen_fs_minimize">收到屏幕边缘</string>
+</resources>

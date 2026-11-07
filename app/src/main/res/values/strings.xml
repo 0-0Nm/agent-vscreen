@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="a11y_desc">Agent-VScreen 只读取副屏（虚拟屏）上的界面元素和在输入框里写字，用来让 agent 在后台副屏上操作应用。它不做手势、不开触摸浏览，不影响你的其它无障碍服务。</string>
+</resources>

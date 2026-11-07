@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- [vscreen] 后台操作 -->
+    <string name="settings_section_session">Session</string>
+    <string name="vscreen_title">Background Operation</string>
+    <string name="vscreen_enable">Enable Background Operation</string>
+    <string name="vscreen_enable_footer">Off by default. Enabling does not mean connected, and never turns on Accessibility, wireless debugging or grants permissions by itself. When off, nothing continues tapping on the main screen.</string>
+    <string name="vscreen_enhanced">Enhanced Planning (Experimental)</string>
+    <string name="vscreen_enhanced_footer">Summarizes action results and re-plans at better moments. Off by default; takes effect on the next send, continue or retry. The running task keeps its mode. Turning it off does not undo actions or clear chat history.</string>
+    <string name="vscreen_section_connection">Connection &amp; Permissions</string>
+    <string name="vscreen_connection">Background connection</string>
+    <string name="vscreen_display_id">Display ID</string>
+    <string name="vscreen_privilege">Privileged connection / authorization</string>
+    <string name="vscreen_accessibility">Accessibility service</string>
+    <string name="vscreen_connect">Connect</string>
+    <string name="vscreen_open_permissions">Open permission settings</string>
+    <string name="vscreen_screen_size">Screen size</string>
+    <string name="vscreen_screen_size_auto">Matches main screen</string>
+    <string name="vscreen_screen_size_footer">Each background screen uses the main screen size and density. After a task ends or is stopped the screen is released and the connection kept; the next background task creates a screen automatically. Stop &amp; release, turning the feature off, or a lost connection require reconnecting.</string>
+    <string name="vscreen_section_preview">Preview</string>
+    <string name="vscreen_show_preview">Show preview</string>
+    <string name="vscreen_show_preview_hint">Shown once connected.</string>
+    <string name="vscreen_preview_footer">Shows the screen here and in the owning chat. The chat mini window can be dragged, pinched, collapsed and expanded. Collapsing or leaving stops preview refresh; the task can still read the screen. The screen is released when the task ends; checking status or the window never recreates it. No overlay permission needed.</string>
+    <string name="vscreen_stop_release">Stop &amp; release</string>
+    <string name="vscreen_stop_release_footer">Stops background operation and releases the display. Nothing moves to the foreground to keep tapping. To turn the feature off, use the switch at the top.</string>
+    <string name="vscreen_conn_disconnected">Not connected</string>
+    <string name="vscreen_conn_connecting">Connecting</string>
+    <string name="vscreen_conn_ready">Connected</string>
+    <string name="vscreen_conn_error">Error</string>
+    <string name="vscreen_not_created">Not created</string>
+    <string name="vscreen_priv_not_installed">Not installed</string>
+    <string name="vscreen_priv_not_running">Service not running</string>
+    <string name="vscreen_priv_not_authorized">Connected, not authorized</string>
+    <string name="vscreen_priv_ready">Connected and authorized</string>
+    <string name="vscreen_a11y_connected">Service connected</string>
+    <string name="vscreen_a11y_disconnected">Service not connected</string>
+    <string name="vscreen_status_waiting">Waiting to connect</string>
+    <string name="vscreen_status_ready_idle">Ready; the next background task creates a screen</string>
+    <string name="vscreen_status_ready_screen">Ready; background screen running</string>
+    <string name="vscreen_status_need_reconnect">Reconnect required</string>
+    <string name="vscreen_status_disabled">Not enabled</string>
+    <string name="vscreen_takeover">Take over</string>
+    <string name="vscreen_hand_back">Hand back</string>
+    <string name="vscreen_operating">Operating</string>
+    <string name="vscreen_taken_over">You\'re in control</string>
+    <string name="vscreen_pill_sleeping">Connected, screen asleep</string>
+    <string name="vscreen_loading">Loading…</string>
+    <string name="vscreen_collapse">Collapse</string>
+    <string name="vscreen_expand">Expand</string>
+    <string name="vscreen_back">Back</string>
+    <string name="vscreen_no_preview">No background screen right now</string>
+    <string name="vscreen_pill_idle">Idle · kept for a few minutes</string>
+    <string name="vscreen_blank_frame">The background screen is blank right now</string>
+    <string name="vscreen_no_app">No app is running on the background screen</string>
+    <!-- full-screen view -->
+    <string name="vscreen_fullscreen">Full screen</string>
+    <string name="vscreen_exit_fullscreen">Exit full screen</string>
+    <string name="vscreen_fs_title">Background screen</string>
+    <string name="vscreen_fs_status_you">You\'re in control · agent waits</string>
+    <string name="vscreen_fs_status_standby">Agent on standby</string>
+    <string name="vscreen_fs_takeover_hint">Take over to tap and type on this screen</string>
+    <string name="vscreen_fs_keyboard">Type text</string>
+    <string name="vscreen_fs_type_hint">Types into the focused field</string>
+    <string name="vscreen_fs_send">Send</string>
+    <string name="vscreen_fs_enter">Enter</string>
+    <string name="vscreen_fs_minimize">Minimize to edge tab</string>
+</resources>
