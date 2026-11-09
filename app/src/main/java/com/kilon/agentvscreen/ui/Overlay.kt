@@ -282,6 +282,7 @@ object Overlay {
     private const val FOLD = 0.2f      // this much of the window past an edge → fold into a tab
     private const val GLIDE_S = 0.2f   // inertia: where a fling would carry the window (velocity × this)
     private var anim: android.animation.ValueAnimator? = null
+    private var deferredSettlePosted = false
 
     internal fun winW(): Float = root?.width?.takeIf { it > 0 }?.toFloat() ?: (widthPx.floatValue + dp(12f))
     internal fun winH(): Float = root?.height?.takeIf { it > 0 }?.toFloat() ?: (widthPx.floatValue / aspect() + dp(12f))
@@ -291,6 +292,7 @@ object Overlay {
     internal const val TAB_H = 60f
     private fun bottomMargin() = dp(48f)
     internal fun stopAnim() { anim?.cancel(); anim = null }
+    internal fun isCurrentRoot(view: android.view.View): Boolean = root === view
     internal fun isMini() = widthPx.floatValue <= clampWidth(0f) + dp(2f)
 
     /** Glide to (x, y), optionally changing the width, then run [then] (default: remember the place). */
@@ -372,6 +374,14 @@ object Overlay {
     private fun restAt(px: Float, py: Float, fingerY: Float? = null) {
         val sw = screenW().toFloat(); val sh = screenH().toFloat()
         val w = winW(); val h = winH()
+        if (!sw.isFinite() || !sh.isFinite() || !w.isFinite() || !h.isFinite() || sw <= 0f || sh <= 0f || w <= 0f || h <= 0f) {
+            if (!deferredSettlePosted) {
+                deferredSettlePosted = true
+                root?.postOnAnimation { deferredSettlePosted = false; if (root != null) settle(fingerY) }
+            }
+            AppLogger.warning("Overlay", "settle deferred: geometry not ready sw=$sw sh=$sh w=$w h=$h")
+            return
+        }
         val side: Boolean? = when {
             px < -w * FOLD -> false
             px + w > sw + w * FOLD -> true
@@ -379,7 +389,7 @@ object Overlay {
             else -> null
         }
         if (side != null) {
-            val ty = (fingerY?.let { it - dp(TAB_H) / 2 } ?: py).coerceIn(topMargin(), sh - dp(TAB_H) - bottomMargin())
+            val ty = OverlayGeometry.rangeClamp(fingerY?.let { it - dp(TAB_H) / 2 } ?: py, topMargin(), (sh - dp(TAB_H) - bottomMargin()).coerceAtLeast(0f))
             // Shrink toward the spot where the tab will sit, then become the tab exactly there.
             val l = lp!!
             val tabCx = if (side) sw - dp(TAB_W) / 2 else dp(TAB_W) / 2
@@ -393,16 +403,22 @@ object Overlay {
                 .withEndAction { swapFade(); dock(side, ty.toInt()) }.start()
             return
         }
-        val x = px.coerceIn(0f, (sw - w).coerceAtLeast(0f))
-        val y = py.coerceIn(topMargin().coerceAtMost(sh - h), (sh - h - bottomMargin()).coerceAtLeast(0f))
-        animateTo(x.toInt(), y.toInt())
+        val placement = OverlayGeometry.place(sw, sh, w, h, topMargin(), bottomMargin(), px, py)
+        if (placement.deferred) {
+            if (!deferredSettlePosted) {
+                deferredSettlePosted = true
+                root?.postOnAnimation { deferredSettlePosted = false; if (root != null) settle(fingerY) }
+            }
+            return
+        }
+        animateTo(placement.x.roundToInt(), placement.y.roundToInt())
     }
 
     internal fun dock(right: Boolean, y: Int? = null) {
         val l = lp ?: return
         stopAnim()
         docked.value = true; dockRight.value = right
-        val ty = (y ?: l.y).coerceIn(topMargin().toInt(), (screenH() - dp(TAB_H) - bottomMargin()).toInt())
+        val ty = OverlayGeometry.rangeClamp((y ?: l.y).toFloat(), topMargin(), (screenH() - dp(TAB_H) - bottomMargin()).coerceAtLeast(0f)).toInt()
         place(if (right) screenW() - dp(TAB_W).toInt() else 0, ty)
         save()
     }
@@ -435,7 +451,7 @@ object Overlay {
     internal fun dockLive(right: Boolean, fingerY: Float, give: Float) {
         stopAnim()
         if (!docked.value || dockRight.value != right) { if (!docked.value) swapFade(); docked.value = true; dockRight.value = right }
-        val ty = (fingerY - dp(TAB_H) / 2).coerceIn(topMargin(), screenH() - dp(TAB_H) - bottomMargin())
+        val ty = OverlayGeometry.rangeClamp(fingerY - dp(TAB_H) / 2, topMargin(), (screenH() - dp(TAB_H) - bottomMargin()).coerceAtLeast(0f))
         place(if (right) (screenW() - dp(TAB_W) - give).toInt() else give.toInt(), ty.toInt())
     }
 
@@ -556,7 +572,10 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration?) {
         super.onConfigurationChanged(newConfig)
         // The main screen turned: keep the window (or its tab) on screen.
-        post { if (Overlay.docked.value) Overlay.dock(Overlay.dockRight.value) else Overlay.settle() }
+        post {
+            if (windowToken == null || Overlay.lp == null || !Overlay.isCurrentRoot(this)) return@post
+            if (Overlay.docked.value) Overlay.dock(Overlay.dockRight.value) else Overlay.settle()
+        }
     }
 
     private fun takenOver(): Boolean = BackgroundOperation.state.value.let { it.takeoverSessionId != null && it.takeoverSessionId == it.ownerSessionId }
