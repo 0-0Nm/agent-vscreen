@@ -377,7 +377,7 @@ class VScreenDisplay private constructor(
 
     private val frameLock = Any()
 
-    fun publishedFrameState(): VScreenDisplayHealth.PublishedFrame = synchronized(frameLock) {
+    private fun publishedFrameState(): VScreenDisplayHealth.PublishedFrame = synchronized(frameLock) {
         VScreenDisplayHealth.PublishedFrame(_frameVersion.value, latestConvertedAtMs)
     }
 
