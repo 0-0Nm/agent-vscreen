@@ -108,6 +108,10 @@ internal object VScreenRemoteDisplay {
     fun userActivity(displayId: Int): Result<Boolean> =
         call(VScreenDisplayService.USER_ACTIVITY, { it.writeInt(displayId) }) { it.readInt() != 0 }
 
+    /** Android 16+ display-group-scoped wake; refusal is explicit, with no global wake fallback. */
+    fun wakeUpWithDisplayId(displayId: Int): Result<Boolean> =
+        call(VScreenDisplayService.WAKE_UP_WITH_DISPLAY, { it.writeInt(displayId) }) { it.readInt() != 0 }
+
     /** Key event with the display id set (reaches a display with its own focus). */
     fun injectKey(displayId: Int, keyCode: Int, longPress: Boolean = false): Result<Boolean> =
         call(VScreenDisplayService.INJECT_KEY, { it.writeInt(displayId); it.writeInt(keyCode); it.writeInt(if (longPress) 1 else 0) }) { it.readInt() != 0 }

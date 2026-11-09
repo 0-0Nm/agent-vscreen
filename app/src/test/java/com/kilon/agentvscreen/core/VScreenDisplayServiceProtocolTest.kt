@@ -1,0 +1,24 @@
+package com.kilon.agentvscreen.core
+
+import android.os.Binder
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Test
+
+class VScreenDisplayServiceProtocolTest {
+    @Test fun transactionConstantsAreUniqueAndRotationStaysAtOriginalSlot() {
+        val txns = listOf(VScreenDisplayService.CREATE, VScreenDisplayService.RELEASE, VScreenDisplayService.PING,
+            VScreenDisplayService.INJECT_KEY, VScreenDisplayService.INJECT_DRAG, VScreenDisplayService.REMOVE_TASK,
+            VScreenDisplayService.LIST, VScreenDisplayService.SET_SURFACE, VScreenDisplayService.TOUCH,
+            VScreenDisplayService.ROTATION, VScreenDisplayService.POINTER, VScreenDisplayService.APS,
+            VScreenDisplayService.PARK, VScreenDisplayService.MOVE_TASK, VScreenDisplayService.LIST_TASKS,
+            VScreenDisplayService.FOCUSED, VScreenDisplayService.FOCUS_TASK, VScreenDisplayService.USER_ACTIVITY,
+            VScreenDisplayService.WAKE_UP_WITH_DISPLAY)
+        assertEquals(txns.size, txns.toSet().size)
+        assertEquals(Binder.FIRST_CALL_TRANSACTION + 9, VScreenDisplayService.ROTATION)
+        assertEquals(Binder.FIRST_CALL_TRANSACTION + 17, VScreenDisplayService.USER_ACTIVITY)
+        assertEquals(Binder.FIRST_CALL_TRANSACTION + 18, VScreenDisplayService.WAKE_UP_WITH_DISPLAY)
+        assertNotEquals(VScreenDisplayService.ROTATION, VScreenDisplayService.USER_ACTIVITY)
+        assertEquals(10, VScreenDisplayService.PROTOCOL)
+    }
+}

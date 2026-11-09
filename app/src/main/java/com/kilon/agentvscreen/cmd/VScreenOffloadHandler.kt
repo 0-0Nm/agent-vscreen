@@ -80,6 +80,9 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         例：act "tap 搜索; type 耳机; key enter until text:综合"
             act "drag 300 900 800 900" --watch 2s
             act --stop "text:到货" --keep notify --for 2h
+  dump [--max-nodes N] [--max-depth N]
+        只读当前已拥有副屏的原生无障碍树；不会连接、接管、唤醒、取消 idle geometry，也不会读取主屏。
+        --max-nodes 1..200；--max-depth 0..20；无活动副屏返回 NO_OWNED_SCREEN。
   note [文字] | note pause "<步骤>" | note resume "<步骤>" | note realtime on|off | note delete <编号|pause|resume|段名>
         给当前应用记笔记（不带参数 = 列出笔记、段和暂停/继续步骤）。下次 launch 会列出来。
         暂停和继续都记了：之后每段 act 先做继续步骤，做完、观察完再做暂停步骤（实时游戏变成回合制）

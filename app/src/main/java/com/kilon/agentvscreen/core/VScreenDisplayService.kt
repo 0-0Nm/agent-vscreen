@@ -157,6 +157,11 @@ class VScreenDisplayService : Binder {
                     val ok = userActivity(id)
                     out.writeInt(0); out.writeInt(if (ok) 1 else 0)
                 }
+                WAKE_UP_WITH_DISPLAY -> {
+                    val id = data.readInt()
+                    val ok = wakeUpWithDisplayId(id)
+                    out.writeInt(0); out.writeInt(if (ok) 1 else 0)
+                }
                 PARK -> {
                     // v21 idle power saving: no surface = display off, the apps on it stop (pages kept).
                     val id = data.readInt()
@@ -622,13 +627,36 @@ class VScreenDisplayService : Binder {
     }
 
 
-    /** Call the per-display IPowerManager overload from the shell UserService. */
-    private fun userActivity(displayId: Int): Boolean = runCatching {
-        if (displayId <= 0 || displayManager().getDisplay(displayId) == null) return false
+    private data class OwnedDisplayInfo(val displayId: Int, val groupId: Int, val flags: Int)
+
+    /** The service's own VD plus the system's real DisplayInfo; never infer ownership from a caller-supplied id. */
+    private fun ownedDisplayInfo(displayId: Int): OwnedDisplayInfo? = runCatching {
+        val vd = synchronized(displays) { displays[displayId] } ?: return null
+        val display = displayManager().getDisplay(displayId) ?: return null
+        if (vd.display.displayId != displayId || !display.isValid) return null
+        val infoClass = Class.forName("android.view.DisplayInfo")
+        val info = infoClass.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
+        val getter = android.view.Display::class.java.getDeclaredMethod("getDisplayInfo", infoClass).apply { isAccessible = true }
+        val returned = getter.invoke(display, info)
+        if (returned is Boolean && !returned) return null
+        val group = infoClass.getDeclaredField("displayGroupId").apply { isAccessible = true }.getInt(info)
+        if (group <= 0) return null
+        val flags = synchronized(displays) { meta[displayId]?.getOrNull(3) ?: 0 }
+        OwnedDisplayInfo(displayId, group, flags)
+    }.getOrNull()
+
+    private fun powerService(): Any? = runCatching {
         val ctx = ShellContext(base ?: systemContext())
-        val pm = ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager ?: return false
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager ?: return null
         val field = pm.javaClass.getDeclaredField("mService").apply { isAccessible = true }
-        val service = field.get(pm) ?: return false
+        field.get(pm)
+    }.getOrNull()
+
+    /** Call only IPowerManager.userActivity(displayId,...), after proving this service owns a real non-default group. */
+    private fun userActivity(displayId: Int): Boolean = runCatching {
+        val owned = ownedDisplayInfo(displayId) ?: return false
+        if (owned.flags and OWN_DISPLAY_GROUP == 0) return false
+        val service = powerService() ?: return false
         val method = service.javaClass.methods.firstOrNull { m ->
             m.name == "userActivity" && m.parameterTypes.contentEquals(arrayOf(
                 Int::class.javaPrimitiveType!!, Long::class.javaPrimitiveType!!,
@@ -636,8 +664,30 @@ class VScreenDisplayService : Binder {
             ))
         } ?: return false
         method.invoke(service, displayId, android.os.SystemClock.uptimeMillis(), 2, 0)
-        synchronized(displays) { if (displays.containsKey(displayId)) touched[displayId] = android.os.SystemClock.elapsedRealtime() }
+        synchronized(displays) { touched[displayId] = android.os.SystemClock.elapsedRealtime() }
         true
+    }.getOrDefault(false)
+
+    /** Android 16+ precise wake path. Missing method/constant or DEVICE_POWER denial is a hard refusal. */
+    private fun wakeUpWithDisplayId(displayId: Int): Boolean = runCatching {
+        if (Build.VERSION.SDK_INT < 36) return false
+        val owned = ownedDisplayInfo(displayId) ?: return false
+        if (owned.flags and OWN_DISPLAY_GROUP == 0) return false
+        val service = powerService() ?: return false
+        val method = service.javaClass.methods.firstOrNull { m ->
+            m.name == "wakeUpWithDisplayId" && m.parameterTypes.contentEquals(arrayOf(
+                Long::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
+                String::class.java, String::class.java, Int::class.javaPrimitiveType!!,
+            ))
+        } ?: return false
+        val reason = android.os.PowerManager::class.java.getDeclaredField("WAKE_REASON_APPLICATION")
+            .apply { isAccessible = true }.getInt(null)
+        method.invoke(service, android.os.SystemClock.uptimeMillis(), reason, "vscreen", SHELL_PKG, displayId)
+        synchronized(displays) { touched[displayId] = android.os.SystemClock.elapsedRealtime() }
+        true
+    }.onFailure { t ->
+        val cause = (t as? java.lang.reflect.InvocationTargetException)?.targetException ?: t
+        AppLogger.warning("VScreenDisplayService", "wakeUpWithDisplayId refused: ${cause.javaClass.simpleName}: ${cause.message}")
     }.getOrDefault(false)
 
     companion object {
@@ -651,7 +701,8 @@ class VScreenDisplayService : Binder {
         const val LIST = FIRST_CALL_TRANSACTION + 6
         const val SET_SURFACE = FIRST_CALL_TRANSACTION + 7
         const val TOUCH = FIRST_CALL_TRANSACTION + 8
-        const val USER_ACTIVITY = FIRST_CALL_TRANSACTION + 9
+        const val USER_ACTIVITY = FIRST_CALL_TRANSACTION + 17
+        const val WAKE_UP_WITH_DISPLAY = FIRST_CALL_TRANSACTION + 18
         const val ROTATION = FIRST_CALL_TRANSACTION + 9
         const val POINTER = FIRST_CALL_TRANSACTION + 10
         const val APS = FIRST_CALL_TRANSACTION + 11
@@ -665,7 +716,7 @@ class VScreenDisplayService : Binder {
         /** A display nobody touched for this long (Minis gone) is released. */
         const val ORPHAN_MS = 20 * 60_000L
         /** Bump when the protocol changes, so Shizuku restarts an old service process. */
-        const val PROTOCOL = 9
+        const val PROTOCOL = 10
         /** Shizuku's reserved "destroy user service" transaction. */
         const val DESTROY_CODE = 16777115
         private const val SHELL_PKG = "com.android.shell"

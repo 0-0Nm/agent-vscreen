@@ -35,7 +35,8 @@ object VScreenAwake {
     class ActionBlocked(message: String) : Exception(message)
 
     private const val TAG = "VScreenAwake"
-    private const val CHECK_MS = 15_000L
+    private const val CHECK_MS = 4_000L
+    private const val ACTIVITY_THROTTLE_MS = 3_000L
     private const val ALARM_MS = 60_000L
     private const val ACTION_TICK = "com.kilon.agentvscreen.lab.core.AWAKE_TICK"
     private const val OWN_DISPLAY_GROUP = 1 shl 11
@@ -46,6 +47,7 @@ object VScreenAwake {
     @Volatile var screenOff = false; private set
     @Volatile private var appContext: Context? = null
     @Volatile private var keeper: Thread? = null
+    @Volatile private var lastActivityAt = 0L
     private var wakeLock: PowerManager.WakeLock? = null
 
     fun init(ctx: Context) {
@@ -84,25 +86,33 @@ object VScreenAwake {
     fun ensure(d: VScreenDisplay): String? {
         if (d.released || d.parked) return null
         val st = stateOf(d) ?: return null
-        if (st == Display.STATE_ON) return null
         if (!canWakeAlone(d)) return "副屏处于休眠（状态 ${stateName(st)}），这台手机上它和主屏一起休眠，单独唤醒会点亮主屏，所以没唤醒：画面可能不动"
         val policy = VScreenPowerPolicy.evaluate(
             api = Build.VERSION.SDK_INT,
             displayId = d.displayId,
             displayFlags = d.flags,
-            ownedDisplayId = appContext?.getSystemService(DisplayManager::class.java)?.getDisplay(d.displayId)?.displayId,
+            ownedDisplayId = d.displayId, // the service performs the authoritative owned-display check
         )
-        if (!policy.allowed) return "副屏休眠（${stateName(st)}），${policy.reason}；未发送全局唤醒，也未执行动作"
-        val attempt = targetedUserActivity(d)
+        if (!policy.allowed) return "副屏（${stateName(st)}），${policy.reason}；未发送全局唤醒，也未执行动作"
+        if (st == Display.STATE_ON) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastActivityAt >= ACTIVITY_THROTTLE_MS) {
+                val active = targetedUserActivity(d)
+                lastActivityAt = now
+                if (!active) AppLogger.warning(TAG, "display ${d.displayId}: userActivity refused while ON")
+            }
+            return null
+        }
+        val attempt = targetedWake(d)
         val t0 = SystemClock.elapsedRealtime()
         while (attempt && SystemClock.elapsedRealtime() - t0 < 2_000L && stateOf(d) != Display.STATE_ON) Thread.sleep(100)
         val on = stateOf(d) == Display.STATE_ON
         wakes++
-        lastWake = "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} ${if (on) "定向活跃后已亮" else "定向活跃后仍未亮"}（原状态 ${stateName(st)}${if (screenOff) "，主屏熄屏中" else ""}，attempt=$attempt）"
+        lastWake = "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} ${if (on) "定向唤醒后已亮" else "定向唤醒后仍未亮"}（原状态 ${stateName(st)}${if (screenOff) "，主屏熄屏中" else ""}，attempt=$attempt）"
         AppLogger.info(TAG, "display ${d.displayId}: $lastWake")
         if (on) { d.requestFreshFrame(); d.awaitFrameAfter(SystemClock.elapsedRealtime(), 400) }
-        return if (on) "副屏刚才休眠了（${stateName(st)}${if (screenOff) "，手机熄屏中" else ""}），定向活跃后已亮"
-        else "副屏休眠（${stateName(st)}），定向活跃未证实唤醒：画面可能不动；没有使用全局 wakeUp/电源键"
+        return if (on) "副屏刚才休眠了（${stateName(st)}${if (screenOff) "，手机熄屏中" else ""}），定向唤醒后已亮"
+        else "副屏休眠（${stateName(st)}），定向唤醒未证实唤醒：画面可能不动；没有使用全局 wakeUp/电源键"
     }
 
     /**
@@ -131,6 +141,9 @@ object VScreenAwake {
     /** Invoke only the shell UserService per-display IPowerManager overload; never the default-display API. */
     private fun targetedUserActivity(d: VScreenDisplay): Boolean =
         VScreenRemoteDisplay.userActivity(d.displayId).getOrDefault(false)
+
+    private fun targetedWake(d: VScreenDisplay): Boolean =
+        VScreenRemoteDisplay.wakeUpWithDisplayId(d.displayId).getOrDefault(false)
 
     /** Work is pending on the background screen: a chat turn owns it, or a watch runs. */
     private fun needed(): Boolean = BackgroundOperation.needsAwake()

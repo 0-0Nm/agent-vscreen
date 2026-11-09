@@ -612,6 +612,18 @@ object BackgroundOperation {
         return d
     }
 
+    /** Strict read path: only the already-owned live display. It never connects, adopts, unparks, or changes geometry. */
+    @Throws(ActionError::class)
+    fun acquireExistingOwned(sessionId: String?): VScreenDisplay {
+        val sid = sessionId?.takeIf { it.isNotEmpty() }
+            ?: throw ActionError("NO_SESSION", "没有会话（请求头 X-VScreen-Session）")
+        val s = _state.value
+        val d = display
+        if (!s.enabled || s.connection != Connection.READY || s.ownerSessionId != sid || d == null || d.released || d.parked)
+            throw ActionError("NO_OWNED_SCREEN", "严格只读拒绝：没有当前会话已持有的活动副屏；不会连接、接管、唤醒或读取主屏")
+        return d
+    }
+
     private fun acquireInner(sessionId: String?, create: Boolean, landscape: Boolean?, scale: Double): VScreenDisplay {
         val sid = sessionId?.takeIf { it.isNotEmpty() }
             ?: throw ActionError("NO_SESSION", "没有会话（请求头 X-VScreen-Session）")
@@ -688,6 +700,7 @@ object BackgroundOperation {
                             note = "接回了上次留下的副屏（$why）")
                     }
                     AppLogger.info(TAG, "adopted display ${d.displayId} for $sid")
+                    if (needsAwake()) VScreenAwake.kick("接回副屏")
                     return d
                 }
             }
@@ -710,6 +723,7 @@ object BackgroundOperation {
             // Keyboard must never pop up on the user's screen for this display.
             val ime = runCatching { VScreenShell.hideImeOn(ctx(), d.displayId) }.getOrNull()
             if (ime != null && !ime.ok) AppLogger.warning(TAG, ime.message)
+            if (needsAwake()) VScreenAwake.kick("创建副屏")
             return d
         }
     }
@@ -909,7 +923,7 @@ object BackgroundOperation {
         val sid = sessionId ?: throw ActionError("NO_SESSION", "没有会话（请求头 X-VScreen-Session）")
         if (_state.value.userStopped) throw ActionError("USER_STOPPED", userStoppedMessage())
         waitWhileTakenOver(sid)
-        val d = acquire(sid, create = false)
+        val d = if (strictReadOnly) acquireExistingOwned(sid) else acquire(sid, create = false)
         val startedMs = System.currentTimeMillis()
         val task = synchronized(lock) { tasks.getOrPut(sid) { TaskInfo(sid) } }
         // All user/generation/re-read checks are evaluated before the display-state gate. This is
@@ -932,13 +946,14 @@ object BackgroundOperation {
             }
             VScreenDisplayHealth.PreActionBlock.NONE -> Unit
         }
-        if (!isRead && !strictReadOnly) {
+        if (!strictReadOnly) {
             try {
-                VScreenAwake.ensureForAction(d)?.let { _state.update { st -> st.copy(note = it) } }
+                if (isRead) VScreenAwake.ensure(d)?.let { _state.update { st -> st.copy(note = it) } }
+                else VScreenAwake.ensureForAction(d)?.let { _state.update { st -> st.copy(note = it) } }
             } catch (e: VScreenAwake.ActionBlocked) {
-                throw ActionError("DISPLAY_NOT_AWAKE", e.message ?: "副屏未唤醒，未执行请求的触摸、输入或按键动作；门禁内部可能已发送唤醒键")
+                throw ActionError("DISPLAY_NOT_AWAKE", e.message ?: "副屏未唤醒，未执行请求的触摸、输入或业务按键动作；门禁内部可能已发送定向唤醒")
             }
-            actionStarted[d.displayId] = startedMs
+            if (!isRead) actionStarted[d.displayId] = startedMs
         }
         if (!strictReadOnly && d.shellOwned) runCatching { VScreenRemoteDisplay.touch(d.displayId) }
         if (!strictReadOnly) runCatching { ensureUpright(d) }.onFailure { AppLogger.warning(TAG, "orientation check failed: ${it.message}") }

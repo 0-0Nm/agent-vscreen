@@ -98,11 +98,15 @@ class VScreenV49Test {
         val h = VScreenOffloadHandler(RuntimeEnvironment.getApplication())
         assertEquals(setOf("stop", "watch", "paused", "keep", "for", "save", "confirmed"), h.optionsOf("act"))
         assertEquals(setOf("landscape", "portrait", "restart"), h.optionsOf("launch"))
+        assertEquals(setOf("max-nodes", "max-depth"), h.optionsOf("dump"))
         assertNull(h.optionsOf("tap"))
         refused { h.checkOptions("act", listOf("--expect", "x")) }
         refused { h.checkOptions("act", listOf("--paused=1")) }
         refused { h.checkOptions("act", listOf("--stop")) }
         h.checkOptions("act", listOf("tap 1 1", "--stop", "text:x", "--paused"))
+        h.checkOptions("dump", listOf("--max-nodes", "80", "--max-depth", "12"))
+        refused { h.checkOptions("dump", listOf("--max-nodes")) }
+        refused { h.checkOptions("dump", listOf("--max-depth", "12", "--unknown")) }
         // Every switch and duration the parser knows is spelled in some help line, and every command in the
         // dispatch table has a help line.
         val all = Regex("--([a-z][a-z0-9-]*)").findAll(VScreenOffloadHandler.HELP).map { it.groupValues[1] }.toSet()
@@ -116,7 +120,7 @@ class VScreenV49Test {
 
     @Test fun dumpIsARealHandlerRouteNotJustHelp() {
         val h = VScreenOffloadHandler(RuntimeEnvironment.getApplication())
-        val result = h.handle(NativeOffloadRequest(listOf("vscreen", "dump", "--max-nodes", "1"), "route-test"))
+        val result = h.handle(NativeOffloadRequest(listOf("vscreen", "dump", "--max-nodes", "80", "--max-depth", "12"), "route-test"))
         assertFalse("dump fell through to unknown command: ${result.output}", result.output.contains("没有命令 'dump'"))
         assertFalse("dump fell through to v49 help: ${result.output}", result.output.contains("v49 只有一个操作动词"))
     }
