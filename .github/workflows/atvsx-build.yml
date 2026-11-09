@@ -33,9 +33,42 @@ jobs:
           sha256sum app/src/main/assets/vscreen-ocr/*.onnx
           sdkmanager "platforms;android-36" "build-tools;35.0.0"
           chmod +x gradlew tsbridge/build.sh
+      - name: Restore verified Gradle distribution
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/atvsx-gradle
+          key: atvsx-gradle-8.11.1-f397b287023acdba1e9f6fc5ea72d22dd63669d59ed4a289a29b1a76eee151c6
+      - name: Fetch and verify Gradle on cloud runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIR="$RUNNER_TEMP/atvsx-gradle"
+          mkdir -p "$DIR"
+          ZIP="$DIR/gradle-8.11.1-bin.zip"
+          EXPECTED="f397b287023acdba1e9f6fc5ea72d22dd63669d59ed4a289a29b1a76eee151c6"
+          valid() { test -f "$ZIP" && printf '%s  %s\n' "$EXPECTED" "$ZIP" | sha256sum -c - >/dev/null 2>&1; }
+          if ! valid; then
+            for URL in \
+              'https://github.com/gradle/gradle-distributions/releases/download/v8.11.1/gradle-8.11.1-bin.zip' \
+              'https://gh-proxy.com/https://github.com/gradle/gradle-distributions/releases/download/v8.11.1/gradle-8.11.1-bin.zip' \
+              'https://gh-proxy.org/https://github.com/gradle/gradle-distributions/releases/download/v8.11.1/gradle-8.11.1-bin.zip'; do
+              echo "Testing Gradle route: $URL"
+              if curl --fail --location --connect-timeout 15 --max-time 180 --retry 1 --retry-delay 2 "$URL" -o "$ZIP.partial"; then
+                if printf '%s  %s\n' "$EXPECTED" "$ZIP.partial" | sha256sum -c -; then
+                  mv "$ZIP.partial" "$ZIP"
+                  break
+                fi
+              fi
+            done
+          fi
+          valid || { echo 'No route delivered the official Gradle distribution'; exit 1; }
+          unzip -tq "$ZIP"
+          unzip -oq "$ZIP" -d "$DIR"
+          echo "$DIR/gradle-8.11.1/bin" >> "$GITHUB_PATH"
+          "$DIR/gradle-8.11.1/bin/gradle" --version
       - uses: gradle/actions/setup-gradle@v4
       - name: Run targeted display-health unit tests
-        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest'
+        run: gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest'
       - name: Stage targeted test artifacts
         if: always()
         shell: bash
@@ -72,7 +105,7 @@ jobs:
       - name: Build Android arm64 Tailscale helper
         run: sh tsbridge/build.sh
       - name: Assemble coexist debug APK
-        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
+        run: gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
       - name: Verify APK identity and signature
         shell: bash
         run: |
