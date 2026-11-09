@@ -121,8 +121,12 @@ import kotlin.math.roundToInt
  *  - hold one finger still for 1 s to take over (a ring fills); a light tap only shows these hints;
  *  - while you hold the screen, taps / swipes / long presses on the picture go to the background screen, and you move
  *    the window by its title pill.
- * Buttons: ■ stop the AI (its calls get USER_STOPPED until you hand back), × close the screen (tap twice), ⤢ full screen,
- * and the green 交还 AI pill.
+ * Buttons (1.1.6: one job per place, so a quick double tap can never stop the AI by accident):
+ *  - top right: ⤢ full screen and × close. × is always there and always one tap: while the AI works it only hides the
+ *    window for this turn (the AI goes on; the notification can bring it back); when nothing runs it closes the screen.
+ *    Closing never stops or locks the AI.
+ *  - bottom left, only while the AI acts or waits: the red "停止 AI" pill (its calls get USER_STOPPED until you allow
+ *    it again: green 交还 AI pill here, the "已停止 AI" notification, or the app's home).
  * While our own full-screen page is in front, the window steps aside (the page already shows the same picture).
  */
 object Overlay {
@@ -157,9 +161,9 @@ object Overlay {
         ctx = c.applicationContext
         job?.cancel()
         job = scope.launch {
-            combine(BackgroundOperation.state.map { it.displayId != null && it.showPreview }.distinctUntilChanged(), fullscreenOpen) { up, full -> up to full }
+            combine(BackgroundOperation.state.map { it.displayId != null && it.showPreview && !it.windowHidden }.distinctUntilChanged(), fullscreenOpen) { up, full -> up to full }
                 .distinctUntilChanged().collect { (up, full) ->
-                    AppLogger.info("Overlay", when { !up -> "no screen / preview off: hide"; full -> "full-screen page in front: hide"; else -> "screen up: show" })
+                    AppLogger.info("Overlay", when { !up -> "no screen / preview off / closed by the user: hide"; full -> "full-screen page in front: hide"; else -> "screen up: show" })
                     if (up && !full) show() else hide()
                 }
         }
@@ -168,7 +172,13 @@ object Overlay {
     fun detach() { job?.cancel(); job = null; hide() }
 
     /** Re-check after the overlay permission was granted. */
-    fun refresh() { val s = BackgroundOperation.state.value; if (s.displayId != null && s.showPreview && !fullscreenOpen.value) show() }
+    fun refresh() { val s = BackgroundOperation.state.value; if (s.displayId != null && s.showPreview && !s.windowHidden && !fullscreenOpen.value) show() }
+
+    /** 1.1.6: the × button. One tap, never a lock: see [BackgroundOperation.closeWindow]. */
+    fun closeTapped() {
+        val msg = BackgroundOperation.closeWindow()
+        ctx?.let { android.widget.Toast.makeText(it, msg, android.widget.Toast.LENGTH_LONG).show() }
+    }
 
     /** The accessibility service came or went: move the window to the better host. Main thread. */
     fun rehost() {
@@ -751,22 +761,32 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
                 Text(title, color = Color.White, fontSize = (11 * k).sp, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
             }
 
-            // Buttons, top right.
+            // Buttons, top right: full screen, close. Same places in every state.
             Row(Modifier.align(Alignment.TopEnd).padding(end = (6 * k).dp, top = (6 * k).dp)) {
-                when (mode) {
-                    Mode.ACTING, Mode.STANDBY -> RoundBtn(Icons.Filled.Stop, "停止 AI", Palette.stopped, k, "stop") { BackgroundOperation.userStop() }
-                    else -> {
-                        val armed = Overlay.closeArmedAt.longValue > 0 && SystemClock.uptimeMillis() - Overlay.closeArmedAt.longValue < 3000
-                        RoundBtn(Icons.Filled.Close, "关闭副屏", if (armed) Palette.stopped else Color(0xCC12141C), k, "close") {
-                            if (Overlay.closeArmedAt.longValue > 0 && SystemClock.uptimeMillis() - Overlay.closeArmedAt.longValue < 3000) {
-                                Overlay.closeArmedAt.longValue = 0L
-                                BackgroundOperation.releaseNow(owner)
-                            } else Overlay.closeArmedAt.longValue = SystemClock.uptimeMillis()
-                        }
-                    }
-                }
-                Spacer(Modifier.width((5 * k).dp))
                 RoundBtn(Icons.Filled.OpenInFull, "全屏", Color(0xCC12141C), k, "full") { Overlay.openFull() }
+                Spacer(Modifier.width((5 * k).dp))
+                RoundBtn(Icons.Filled.Close, if (mode == Mode.ACTING || mode == Mode.STANDBY || mode == Mode.TAKEOVER) "收起小窗" else "关闭副屏",
+                    Color(0xCC12141C), k, "close") { Overlay.closeTapped() }
+            }
+
+            // Stop the AI: its own labelled place, bottom left, only while the AI has the screen.
+            if (mode == Mode.ACTING || mode == Mode.STANDBY) {
+                Row(
+                    Modifier.align(Alignment.BottomStart).padding(start = (8 * k).dp, bottom = (8 * k).dp).control("stop")
+                        .clip(RoundedCornerShape(50)).background(Palette.stopped).clickable { BackgroundOperation.userStop() }
+                        .padding(horizontal = (10 * k).dp, vertical = (5 * k).dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Stop, null, tint = Color.White, modifier = Modifier.size((13 * k).dp))
+                    Spacer(Modifier.width((3 * k).dp))
+                    Text("停止 AI", color = Color.White, fontSize = (11 * k).sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            // Stopped: say what that means right on the window.
+            if (mode == Mode.STOPPED) {
+                Text("已停止 AI：它的操作会被拒绝，点“交还 AI”或通知里的“允许继续”放开", color = Color.White, fontSize = (10 * k).sp, lineHeight = (13 * k).sp,
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = (12 * k).dp).clip(RoundedCornerShape(10.dp)).background(Color(0xDD7F1D1D)).padding(horizontal = 8.dp, vertical = 5.dp))
             }
 
             // Hand back, bottom centre.
@@ -783,13 +803,11 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
                 }
             }
 
-            // Messages: close armed, hints.
-            val armed = Overlay.closeArmedAt.longValue > 0
+            // Messages: gesture hints.
             var now by remember { mutableLongStateOf(SystemClock.uptimeMillis()) }
-            LaunchedEffect(Overlay.hintAt.longValue, Overlay.closeArmedAt.longValue) { now = SystemClock.uptimeMillis(); delay(3100); now = SystemClock.uptimeMillis() }
+            LaunchedEffect(Overlay.hintAt.longValue) { now = SystemClock.uptimeMillis(); delay(3100); now = SystemClock.uptimeMillis() }
             val hint = when {
-                armed && now - Overlay.closeArmedAt.longValue < 3000 -> "再点一次 × 关闭副屏"
-                Overlay.hintAt.longValue > 0 && now - Overlay.hintAt.longValue < 2500 -> "长按 1 秒接管 · 双指缩放 · 拖到边缘收起"
+                Overlay.hintAt.longValue > 0 && now - Overlay.hintAt.longValue < 2500 -> "长按 1 秒接管 · 双指缩放 · 拖到边缘收起 · × 关闭"
                 else -> null
             }
             AnimatedVisibility(hint != null, Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) {

@@ -12,6 +12,7 @@ class VScreenApp : Application() {
         super.onCreate()
         AppLogger.init(this)
         ApiConfig.init(this)
+        com.kilon.agentvscreen.api.AgentLedger.init(this)
         ShizukuManager.init(this)
         BackgroundOperation.init(this)
         if (Prefs.serviceOn(this)) HostService.start(this)

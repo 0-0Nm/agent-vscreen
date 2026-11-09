@@ -99,6 +99,14 @@ object BackgroundOperation {
         val note: String? = null,
         /** 1.1: the user pressed Stop on the window: every agent action is refused until the user hands back. */
         val userStopped: Boolean = false,
+        /** 1.1.6: when the user pressed Stop (wall-clock ms; 0 = not stopped). Shown to the agent and in the notification. */
+        val stoppedAt: Long = 0L,
+        /**
+         * 1.1.6: the user closed the floating window with × while the AI was still working. Hiding the window is only
+         * about the user's view: it never stops or locks the AI. The window comes back with the agent's next turn, or
+         * from the notification (显示小窗).
+         */
+        val windowHidden: Boolean = false,
         /** 1.1: what the agent says it is doing (`vscreen title`), shown on the window's pill; cleared with the turn. */
         val agentTitle: String? = null,
     )
@@ -469,6 +477,8 @@ object BackgroundOperation {
             tasks[sessionId] = TaskInfo(sessionId)
             turns.add(sessionId)
         }
+        // A window the user hid during the previous turn comes back for the new one.
+        if (_state.value.windowHidden) _state.update { it.copy(windowHidden = false) }
         VScreenAwake.kick("任务开始")
     }
 
@@ -510,7 +520,7 @@ object BackgroundOperation {
     /** 1.1: the user's Stop: refuse the agent (USER_STOPPED) until [userResume]; a finger the agent holds is lifted. */
     fun userStop() {
         val d = display
-        _state.update { it.copy(userStopped = true, takeoverSessionId = null, operating = false) }
+        _state.update { it.copy(userStopped = true, stoppedAt = System.currentTimeMillis(), takeoverSessionId = null, operating = false) }
         d?.let { Thread { runCatching { VScreenShell.finger(it.displayId, "cancel", 0, -1, -1) } }.apply { isDaemon = true }.start() }
         AppLogger.info(TAG, "user stop")
     }
@@ -519,7 +529,48 @@ object BackgroundOperation {
     fun userResume() {
         val s = _state.value
         synchronized(lock) { s.ownerSessionId?.let { tasks[it]?.rereadRequired = true } }
-        _state.update { it.copy(userStopped = false, takeoverSessionId = null) }
+        _state.update { it.copy(userStopped = false, stoppedAt = 0L, takeoverSessionId = null) }
+        AppLogger.info(TAG, "user allowed the AI to continue")
+    }
+
+    /**
+     * 1.1.6: the window's ×, always one tap. It only answers "I don't want to look at this now":
+     *  - while a turn runs (AI acting / waiting / you holding the screen): the window goes away for the rest of this turn,
+     *    the AI keeps working in the background (a takeover is handed back: a hidden screen cannot be driven);
+     *  - when nothing runs (idle, or you stopped the AI): the screen itself is closed; the agent's next launch builds a
+     *    new one. A Stop lock is NOT lifted by this: it stays, and the notification keeps saying so.
+     * Returns what happened, for a short toast.
+     */
+    fun closeWindow(): String {
+        val s = _state.value
+        val owner = s.ownerSessionId ?: return "没有副屏"
+        val turnRunning = synchronized(lock) { owner in turns }
+        if (s.userStopped || !turnRunning) {
+            releaseScreen(if (s.userStopped) "你从悬浮窗关闭了副屏（AI 仍处于停止状态）" else "你从悬浮窗关闭了副屏")
+            _state.update { it.copy(windowHidden = false) }
+            return if (s.userStopped) "副屏已关闭。AI 仍是停止状态：要让它继续，在通知里点“允许继续”" else "副屏已关闭"
+        }
+        if (s.takeoverSessionId != null) {
+            synchronized(lock) { tasks[owner]?.rereadRequired = true }
+            _state.update { it.copy(takeoverSessionId = null) }
+        }
+        _state.update { it.copy(windowHidden = true) }
+        AppLogger.info(TAG, "window hidden by the user (AI keeps working)")
+        return "小窗已收起，AI 继续在后台工作。通知栏的“显示小窗”可以再打开"
+    }
+
+    /** 1.1.6: bring the hidden window back (notification action, app home). */
+    fun showWindow() { _state.update { it.copy(windowHidden = false) } }
+
+    /**
+     * 1.1.6: one text for every USER_STOPPED refusal, so the agent can tell the user exactly when it happened and how to
+     * undo it (the user may not have seen the app since). The agent itself can never lift it.
+     */
+    fun userStoppedMessage(): String {
+        val at = _state.value.stoppedAt
+        val whenText = if (at > 0) java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(at)) + " " else ""
+        return "用户在 ${whenText}按了悬浮窗上的“停止 AI”，所以你的操作现在都会被拒绝（动作没有执行）。这是用户的安全开关，你解除不了，不要重试。" +
+            "请原样转告用户：要让我继续，下拉通知栏，在“已停止 AI”那条通知上点“允许继续”；也可以点悬浮窗上的“交还 AI”，或打开 Agent-VScreen 首页点“允许继续”。"
     }
 
     fun setTitle(sessionId: String, title: String?) {
@@ -855,8 +906,7 @@ object BackgroundOperation {
         block: (VScreenDisplay) -> T,
     ): T {
         val sid = sessionId ?: throw ActionError("NO_SESSION", "没有会话（请求头 X-VScreen-Session）")
-        if (_state.value.userStopped) throw ActionError("USER_STOPPED",
-            "用户在悬浮窗上点了“停止”，不让你继续操作副屏。动作没有执行：停下来告诉用户，问用户要不要继续；用户点“交还 AI”后才能再操作。不要反复重试")
+        if (_state.value.userStopped) throw ActionError("USER_STOPPED", userStoppedMessage())
         waitWhileTakenOver(sid)
         val d = acquire(sid, create = false)
         val startedMs = System.currentTimeMillis()

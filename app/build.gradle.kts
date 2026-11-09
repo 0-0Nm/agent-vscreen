@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,12 +13,12 @@ android {
         applicationId = "com.kilon.agentvscreen"
         minSdk = 30
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.1.5"
+        versionCode = 8
+        versionName = "1.1.6"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     // Release signing is read from keystore.properties (not committed). See keystore.properties.example.
-    val ksProps = java.util.Properties().apply {
+    val ksProps = Properties().apply {
         val f = rootProject.file("keystore.properties")
         if (f.exists()) f.inputStream().use { load(it) }
     }
@@ -43,6 +45,8 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
     androidResources { noCompress += "onnx" }
+    // The built-in Tailscale node is an executable shipped as lib*.so: it must be unpacked into nativeLibraryDir.
+    packaging { jniLibs { useLegacyPackaging = true } }
     lint { checkReleaseBuilds = false; abortOnError = false }
     testOptions { unitTests.isReturnDefaultValues = true; unitTests.isIncludeAndroidResources = true }
 }

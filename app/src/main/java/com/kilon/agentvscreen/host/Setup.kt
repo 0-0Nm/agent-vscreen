@@ -20,7 +20,7 @@ object Setup {
 
     fun check(ctx: Context): List<Item> {
         val sh = ShizukuManager.snapshot.value
-        val pw = VScreenPower.check(ctx)
+        val pw = VScreenPower.heal(ctx, "setup check")
         return listOf(
             Item("shizuku", "Shizuku 授权", sh.state == ShizukuManager.State.READY, when (sh.state) {
                 ShizukuManager.State.NOT_INSTALLED -> "没装 Shizuku（或 Sui）"
@@ -31,7 +31,12 @@ object Setup {
             Item("overlay", "悬浮窗", Settings.canDrawOverlays(ctx), "副屏小窗（看进度、接管）"),
             Item("accessibility", "无障碍（只读）", VScreenAccessibilityService.getInstance() != null, "元素列表和中文输入更准；不开也能用（只靠文字识别）"),
             Item("notifications", "通知", NotificationManagerCompat.from(ctx).areNotificationsEnabled(), "盯守提醒、交还提醒"),
-            Item("battery", "电池优化和后台运行", pw.ok, if (pw.ok) "已加入电池白名单、允许后台运行" else pw.problems().joinToString("、")),
+            Item("battery", "电池优化和后台运行", pw.ok, when {
+                pw.ok && VScreenPower.resets > 0 -> "已加入电池白名单、允许后台运行（系统收回过 ${VScreenPower.resets} 次：${VScreenPower.lastResetWhat}，每次都已自动补上，不用你管）"
+                pw.ok -> "已加入电池白名单、允许后台运行（被系统收回时会自动补上）"
+                ShizukuManager.isReady() -> "自动设置没成功：" + pw.problems().joinToString("、") + "。请手动：" + VScreenPower.manualSteps()
+                else -> pw.problems().joinToString("、") + "（Shizuku 就绪后会自动补上）"
+            }),
         ) + vendorItem(ctx)
     }
 
@@ -44,7 +49,7 @@ object Setup {
         val page = Liveness.vendorPage(ctx) ?: return emptyList()
         val done = Liveness.vendorSetupDone(ctx)
         return listOf(Item("vendor_bg", "系统后台管理", done,
-            if (done) "已在“$page”里设置；如果之后又被冻结，这一项会重新亮起"
+            if (done) "已在“$page”里设置；只有亮屏使用时又被冻结，这一项才会重新亮起"
             else "在“$page”里把 Agent-VScreen 改成手动管理，允许自启动、关联启动和后台活动"))
     }
 

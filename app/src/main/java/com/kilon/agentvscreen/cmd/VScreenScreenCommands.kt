@@ -79,6 +79,13 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
             else -> "没开过（App 首页一键配置）"
         } })
         .put("user_stopped", BackgroundOperation.state.value.userStopped)
+        .also { o -> if (BackgroundOperation.state.value.userStopped) o.put("user_stopped_note", BackgroundOperation.userStoppedMessage()) }
+        .put("window_hidden_by_user", s.windowHidden)
+        .put("remote", when (com.kilon.agentvscreen.api.ApiConfig.tailnetMode) {
+            com.kilon.agentvscreen.host.Tailnet.Mode.BUILTIN -> com.kilon.agentvscreen.host.Tailnet.status.value.json()
+            com.kilon.agentvscreen.host.Tailnet.Mode.SYSTEM -> JSONObject().put("mode", "system").put("ip", com.kilon.agentvscreen.host.HostService.server?.tailAddress ?: JSONObject.NULL)
+            else -> JSONObject().put("mode", "off")
+        })
         .also { o -> d?.let { o.put("accessibility_sees_display", BackgroundOperation.nodeRoots(it.displayId).isNotEmpty()) } }
         .put("user_takeover", s.takeoverSessionId != null)
         .put("screen", "${s.screenWidth}x${s.screenHeight}@${s.screenDpi}dpi")
@@ -160,7 +167,7 @@ internal fun VScreenOffloadHandler.degraded(d: VScreenDisplay?): Pair<JSONArray,
         sug.put("Agent-VScreen 的服务没能成为前台服务（${live.foregroundError ?: "原因未知"}）：它在后台会被冻结，命令会卡住直到用户打开它。请用户打开一次 Agent-VScreen（会自动补上）。")
     } else if (live.recentlyFrozen()) {
         deg.put("frozen_in_background")
-        sug.put("系统在后台冻结过 Agent-VScreen ${live.freezes} 次（最近一次 ${live.lastFreezeMs / 1000} 秒），那段时间的命令会一直等。" +
+        sug.put("亮屏时系统在后台冻结过 Agent-VScreen ${live.screenOnFreezes} 次（最近一次 ${live.lastFreezeMs / 1000} 秒），那段时间的命令会一直等。" +
             "请用户打开 Agent-VScreen，点首页“后台运行受限”的“去设置”，把它设为允许自启动、关联启动和后台活动（荣耀/华为：应用启动管理 › 手动管理）。")
     }
     if (s.privilege.name != "READY") {

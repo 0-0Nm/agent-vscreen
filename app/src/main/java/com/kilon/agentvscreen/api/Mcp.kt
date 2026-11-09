@@ -53,7 +53,10 @@ internal object Mcp {
                     .put("protocolVersion", if (want in VERSIONS) want else VERSIONS.first())
                     .put("capabilities", JSONObject().put("tools", JSONObject().put("listChanged", false)))
                     .put("serverInfo", JSONObject().put("name", "agent-vscreen").put("version", BuildConfig.VERSION_NAME))
-                    .put("instructions", "用 vscreen 工具在副屏操作应用。先 `launch 应用名`，再 `act \"步骤; 步骤\"`。`help all` 看完整说明。"))
+                    // 1.1.6: the full short guide, so every new conversation of an MCP agent knows how to use us
+                    // without anyone having saved a note.
+                    .put("instructions", "Agent-VScreen：这台手机上的后台副屏。要打开、查看或操作手机里的应用时，用 vscreen 工具（参数 command 就是一条 vscreen 命令行），" +
+                        "它在看不见的副屏上操作，不打扰用户主屏，不需要 adb。\n\n" + AgentGuide.guide().replace("`vscreen ", "`")))
             }
             "ping" -> result(id, JSONObject())
             "tools/list" -> result(id, JSONObject().put("tools", JSONArray().put(TOOL)))

@@ -45,6 +45,7 @@ class ApiServer(private val ctx: Context) {
     @Volatile var lastError: String? = null; private set
     @Volatile var requests = 0L; private set
     @Volatile var lastClient: String? = null; private set
+    @Volatile var lastCaller: String? = null; private set
 
     val running: Boolean get() = server?.isClosed == false
 
@@ -170,6 +171,15 @@ class ApiServer(private val ctx: Context) {
     class Req(val method: String, val path: String, val query: Map<String, List<String>>, val headers: Map<String, String>, val body: ByteArray) {
         /** Who connected: loopback (this phone) or a tailnet peer. */
         @Volatile var peer: InetAddress? = null
+        /** 1.1.6: forwarded by the built-in Tailscale node (loopback + its secret). */
+        val viaBuiltinTailnet: Boolean get() = peer?.isLoopbackAddress == true &&
+            headers["x-vscreen-tailnet"]?.let { constTimeEq(it, com.kilon.agentvscreen.host.Tailnet.secret) } == true
+        /** Who is calling, for the app's "last caller" line. */
+        val caller: String get() = when {
+            viaBuiltinTailnet -> "Tailscale：" + (headers["x-vscreen-peer"] ?: "?")
+            peer?.isLoopbackAddress == false -> "Tailscale：" + peer?.hostAddress
+            else -> "本机"
+        }
         fun q(k: String) = query[k]?.firstOrNull()
         val bodyText: String get() = String(body, Charsets.UTF_8)
     }
@@ -239,7 +249,12 @@ class ApiServer(private val ctx: Context) {
         // No browser may drive the phone (CSRF / DNS rebinding): only local hosts, no Origin.
         val host = r.headers["host"]?.substringBefore(':')?.lowercase()
         val remote = r.peer?.let { !it.isLoopbackAddress } == true
-        if (remote) {
+        if (r.viaBuiltinTailnet) {
+            // 1.1.6: forwarded by our own Tailscale node (it alone knows the secret). The caller must still name the
+            // node by its tailnet address or name, so a web page cannot rebind a hostname onto it.
+            if (!com.kilon.agentvscreen.host.Tailnet.status.value.loggedIn) return Resp.err(403, "NOT_ALLOWED", "内置 Tailscale 没有登录")
+            if (host != null && host !in com.kilon.agentvscreen.host.Tailnet.hostNames() && !host.endsWith(".ts.net")) return Resp.err(403, "BAD_HOST", "用这台手机的 Tailscale 地址或名字访问")
+        } else if (remote) {
             // Only a tailnet peer reaches this (the socket is bound to the Tailscale address); it must still name us by
             // that address or a MagicDNS name, so a web page cannot rebind a hostname onto us.
             if (!ApiConfig.tailnet || !isTailnet(r.peer)) return Resp.err(403, "NOT_ALLOWED", "其它设备访问没有打开")
@@ -252,11 +267,13 @@ class ApiServer(private val ctx: Context) {
                 .put("version", BuildConfig.VERSION_NAME).put("code", BuildConfig.VERSION_CODE).put("pid", android.os.Process.myPid())
                 .put("endpoints", JSONArray(listOf("/v1/run", "/v1/shot/<name>", "/v1/events", "/v1/help", "/mcp", "/cli"))))
             "/v1/help" -> return Resp.text(VScreenOffloadHandler.HELP + "\n")
-            "/cli" -> return Resp.text(cliScript())
+            "/cli" -> { if (r.q("via") == "install") AgentLedger.installed(); return Resp.text(cliScript()) }
             "/skill" -> return Resp.text(AgentGuide.skill())
+            "/memory" -> return Resp.text(AgentGuide.memory() + "\n")
         }
         if (!authorized(r)) return Resp.err(401, "BAD_TOKEN", "缺少或错误的令牌：在 Agent-VScreen 里复制接入命令/令牌（Authorization: Bearer <令牌>）")
         lastClient = r.headers["user-agent"]?.take(60)
+        lastCaller = r.caller
         return when {
             r.path == "/v1/run" -> if (r.method == "POST") run(r) else Resp.err(405, "METHOD", "POST")
             r.path.startsWith("/v1/shot/") -> shot(r.path.removePrefix("/v1/shot/"))
@@ -284,15 +301,32 @@ class ApiServer(private val ctx: Context) {
 
     /** Run one command for [session]: the caller's turn is open while it runs and for the quiet window after. */
     fun exec(argv: List<String>, session: String): NativeOffloadResult {
+        val fresh = AgentLedger.call()
+        // 1.1.6: two words that need no screen. `guide` = the short usage; `remembered <where>` = the agent reports
+        // where it saved its note (the app shows it to the user).
+        when (argv.firstOrNull()) {
+            null, "guide" -> return NativeOffloadResult(0, AgentGuide.guide())
+            "remembered" -> {
+                val where = argv.drop(1).joinToString(" ").trim()
+                if (where.isEmpty()) return NativeOffloadResult(2, "用法：vscreen remembered \"<你把说明存在了哪里>\"（例如：长期记忆 / skills/agent-vscreen）\n")
+                AgentLedger.remembered(where)
+                return NativeOffloadResult(0, "已记录：你说把 Agent-VScreen 的说明存在了「${where.take(80)}」。App 首页会显示给用户。以后的新对话里，要操作手机应用时用 vscreen（不知道怎么用就先 vscreen guide）。\n")
+            }
+        }
         com.kilon.agentvscreen.host.A11yHeal.maybeHeal(ctx, "command")
         Turns.begin(session)
-        try { return handler.handle(NativeOffloadRequest(listOf("vscreen") + argv, session)) }
+        try {
+            val res = handler.handle(NativeOffloadRequest(listOf("vscreen") + argv, session))
+            // First call after a long silence (likely a new conversation): one line pointing at the short usage.
+            if (!fresh || argv.first() == "help") return res
+            return res.copy(output = res.output.trimEnd() + "\n\n（Agent-VScreen：用法速查 `vscreen guide`；完整说明 `vscreen help all`。）\n")
+        }
         finally { Turns.end(session) }
     }
 
     /** Picture URLs use the address the caller used (this phone: 127.0.0.1; a tailnet peer: our tailnet address). */
     fun shotUrl(name: String, r: Req? = null): String {
-        val h = r?.headers?.get("host")?.takeIf { r.peer?.isLoopbackAddress == false && it.isNotBlank() }
+        val h = r?.headers?.get("host")?.takeIf { (r.peer?.isLoopbackAddress == false || r.viaBuiltinTailnet) && it.isNotBlank() }
         return (if (h != null) "http://$h" else ApiConfig.baseUrl) + "/v1/shot/$name"
     }
 
@@ -340,6 +374,11 @@ class ApiServer(private val ctx: Context) {
         .replace("@@PORT@@", ApiConfig.port.toString()).replace("@@VERSION@@", BuildConfig.VERSION_NAME)
 
     companion object {
+        fun constTimeEq(a: String, b: String): Boolean {
+            if (a.length != b.length) return false
+            var d = 0; for (i in a.indices) d = d or (a[i].code xor b[i].code); return d == 0
+        }
+
         /** Tailscale hands out 100.64.0.0/10 (CGNAT) addresses. */
         fun isTailnet(a: InetAddress?): Boolean {
             val b = (a as? java.net.Inet4Address)?.address ?: return false

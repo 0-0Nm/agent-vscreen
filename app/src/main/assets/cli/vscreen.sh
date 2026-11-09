@@ -37,10 +37,12 @@ skill_sync() {
   mkdir -p "$CONF_DIR" && c -fsS "$URL/skill" -o "$CONF_DIR/SKILL.md.new" || return 0
   mv -f "$CONF_DIR/SKILL.md.new" "$CONF_DIR/SKILL.md"
   if [ "$1" = "show" ]; then
+    # 1.1.6: short. The request to remember comes from the user's own message (copied from the app), not from here.
     echo
-    echo "===== 给 agent：把下面这段存成你自己的 skill（或写进长期记忆），以后在手机上打开/查看/操作应用都用 vscreen ====="
-    cat "$CONF_DIR/SKILL.md"
-    echo "===== skill 结束（副本在 $CONF_DIR/SKILL.md） ====="
+    echo "要记住的说明（存进你的长期记忆，存好后执行 vscreen remembered \"<存在哪里>\"）："
+    c -fsS "$URL/memory" 2>/dev/null || echo "（取不到，见 $CONF_DIR/SKILL.md）"
+    echo
+    echo "完整的 skill 版本在 $CONF_DIR/SKILL.md；用法速查：vscreen guide"
   else
     echo "（skill 已随 App 更新：$CONF_DIR/SKILL.md，如果你存过旧版，请换成新的）" >&2
   fi
@@ -56,7 +58,7 @@ if [ "$1" = "install" ]; then
     done
   fi
   [ -n "$dest" ] || { echo "vscreen: 找不到可写的安装目录，请指定：vscreen install <令牌> <目录>" >&2; exit 2; }
-  c -fsS "$URL/cli" -o "$dest/vscreen" || { echo "vscreen: 下载失败：Agent-VScreen 在运行吗？" >&2; exit 3; }
+  c -fsS "$URL/cli?via=install" -o "$dest/vscreen" || { echo "vscreen: 下载失败：Agent-VScreen 在运行吗？" >&2; exit 3; }
   chmod +x "$dest/vscreen"
   mkdir -p "$CONF_DIR"
   printf 'VSCREEN_URL=%s\nVSCREEN_TOKEN=%s\n' "$URL" "$tok" > "$CONF_DIR/env"

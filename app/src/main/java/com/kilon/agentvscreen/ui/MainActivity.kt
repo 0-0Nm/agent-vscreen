@@ -165,9 +165,12 @@ class MainActivity : ComponentActivity() {
             }
 
             if (s.userStopped) Banner(
-                "你在悬浮窗上停止了 AI", "agent 的操作现在都会被拒绝（USER_STOPPED），直到你允许继续。", Palette.stopped,
+                "你停止了 AI", "你在悬浮窗上按了“停止 AI”${if (s.stoppedAt > 0) "（" + java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(s.stoppedAt)) + "）" else ""}。在你允许之前，agent 的每个操作都会被拒绝，它也会被告知来找你。关掉悬浮窗不会解除它。", Palette.stopped,
                 "允许继续",
             ) { BackgroundOperation.userResume() }
+            if (s.windowHidden && s.displayId != null && !s.userStopped) Banner(
+                "小窗已收起", "AI 还在后台工作。下一轮开始时小窗会自己回来，也可以现在打开。", Palette.standby, "显示小窗",
+            ) { BackgroundOperation.showWindow() }
 
             com.kilon.agentvscreen.host.Liveness.problem()?.let { p ->
                 Banner("后台运行受限", p, Palette.stopped, "去设置") {
@@ -312,6 +315,8 @@ class MainActivity : ComponentActivity() {
         var tab by remember { mutableIntStateOf(0) }
         var token by remember { mutableStateOf(ApiConfig.token) }
         var showToken by remember { mutableStateOf(false) }
+        var rawOpen by remember { mutableStateOf(false) }
+        val ledger by com.kilon.agentvscreen.api.AgentLedger.snap.collectAsState()
         Block("接入 agent") {
             val tabs = listOf("命令行", "MCP", "HTTP")
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -319,27 +324,31 @@ class MainActivity : ComponentActivity() {
                     SegmentedButton(selected = tab == i, onClick = { tab = i }, shape = SegmentedButtonDefaults.itemShape(i, tabs.size), icon = {}) { Text(t, fontSize = 13.sp) }
                 }
             }
+            val hint = @Composable { t: String -> Text(t, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             when (tab) {
                 0 -> {
-                    Text("Termux、Minis 等带终端的 agent：在 agent 的终端里执行这一行，之后就有 vscreen 命令（App 更新后命令行会自己跟着更新）。",
-                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Code(ApiConfig.installLine()) { copy("安装命令", ApiConfig.installLine()) }
+                    hint("Termux、Minis 等带终端的 agent：复制下面这段话发给它。它会装好 vscreen 命令，并按你的要求把一段说明存进它自己的长期记忆，以后的新对话里也知道手机上有这个工具。")
+                    Button(onClick = { copy("给 agent 的话", AgentGuide.onboard()) }, modifier = Modifier.fillMaxWidth()) { Text("复制给 agent 的话（推荐）") }
+                    TextButton(onClick = { rawOpen = !rawOpen }) { Text(if (rawOpen) "收起安装命令" else "只要安装命令") }
+                    AnimatedVisibility(rawOpen) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            hint("只把命令给 agent 的话，大多数 agent 装完就忘了，新对话里不知道有 vscreen。")
+                            Code(ApiConfig.installLine()) { copy("安装命令", ApiConfig.installLine()) }
+                        }
+                    }
                 }
                 1 -> {
-                    Text("支持 MCP 的 agent：把这段加进它的 MCP 配置（streamable HTTP，一个工具 vscreen，截图直接附在结果里）。",
-                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    hint("支持 MCP 的 agent：把这段加进它的 MCP 配置（streamable HTTP，一个工具 vscreen，截图直接附在结果里）。每次连接时都会带上用法说明，新对话也知道怎么用。")
                     Code(ApiConfig.mcpJson()) { copy("MCP 配置", ApiConfig.mcpJson()) }
                 }
                 else -> {
-                    val h = "POST ${ApiConfig.baseUrl}/v1/run\nAuthorization: Bearer <令牌>\n\n{\"cmd\": \"launch 设置\"}"
-                    Text("自己写调用代码的 agent 应用：返回 JSON（text、data、images、exit、code）。完整说明 GET /v1/help。",
-                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Code(h) { copy("HTTP 示例", h) }
+                    hint("自己写调用代码的 agent 应用：复制下面这段话发给它，里面有地址、令牌和要它记住的说明。返回 JSON（text、data、images、exit、code），完整说明 GET /v1/help。")
+                    Button(onClick = { copy("给 agent 的话", AgentGuide.onboardHttp()) }, modifier = Modifier.fillMaxWidth()) { Text("复制给 agent 的话") }
                 }
             }
-            Button(onClick = { copy("给 agent 的说明", AgentGuide.prompt()) }, modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)) {
-                Text("复制给 agent 的使用说明")
+            AgentMemoryRow(ledger)
+            OutlinedButton(onClick = { copy("记忆说明", if (tab == 2) AgentGuide.memoryHttp() else AgentGuide.memory()) }, modifier = Modifier.fillMaxWidth()) {
+                Text("复制一句话，放进 agent 的自定义指令 / 记忆")
             }
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(start = 12.dp),
@@ -356,21 +365,99 @@ class MainActivity : ComponentActivity() {
                 }
             }
             Text("令牌只给你信任的 agent：拿到它就能在副屏上操作你的应用。服务只监听本机，网页调用一律拒绝。", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            var tail by remember { mutableStateOf(ApiConfig.tailnet) }
-            var tailAddr by remember { mutableStateOf<String?>(null) }
-            LaunchedEffect(tail) { while (true) { tailAddr = HostService.server?.tailAddress; delay(3_000) } }
-            Toggle("让其它设备连进来（Tailscale）", "默认关。只监听本机的 Tailscale 地址：只有你自己 tailnet 里的电脑/手机能连，走加密隧道，局域网和公网都连不到", tail) {
-                tail = it; ApiConfig.tailnet = it; HostService.server?.start(ApiConfig.port)
+            Remote(token)
+        }
+    }
+
+    /** 1.1.6: did the agent keep VScreen in mind? Facts only (see AgentLedger). */
+    @Composable
+    private fun AgentMemoryRow(l: com.kilon.agentvscreen.api.AgentLedger.Snapshot) {
+        if (!l.installed) return
+        val fmt = remember { java.text.SimpleDateFormat("M月d日 HH:mm", java.util.Locale.CHINA) }
+        val (color, title, body) = when {
+            l.cameBack -> Triple(Palette.takeover, "agent 记住了", "安装后，agent 在隔了一段时间的新对话里又主动用了 ${l.comebacks} 次（最近 ${fmt.format(java.util.Date(l.lastComebackAt))}）。" +
+                (l.rememberedWhere?.let { "它说存在了「$it」。" } ?: ""))
+            l.remembered -> Triple(Palette.standby, "agent 说已记住", "存在了「${l.rememberedWhere}」（${fmt.format(java.util.Date(l.rememberedAt))}）。等它在新对话里主动用起来，这里会变成“记住了”。")
+            else -> Triple(Palette.stopped, "agent 还没确认记住", "${fmt.format(java.util.Date(l.installAt))} 装好了 vscreen，但 agent 没有报告把说明存在哪。新对话里它可能不知道有这个工具：再把“给 agent 的话”发给它一次，或把下面那句放进它的自定义指令。")
+        }
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(color.copy(alpha = 0.10f))
+                .border(BorderStroke(1.dp, color.copy(alpha = 0.45f)), RoundedCornerShape(14.dp)).padding(12.dp),
+        ) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = color)
+            Text(body, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+
+    /** 1.1.6: other devices: off / built-in Tailscale (no app needed) / the Tailscale app on this phone. */
+    @Composable
+    private fun Remote(token: String) {
+        var mode by remember { mutableStateOf(ApiConfig.tailnetMode) }
+        val ts by com.kilon.agentvscreen.host.Tailnet.status.collectAsState()
+        var sysAddr by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(mode) { while (true) { sysAddr = HostService.server?.tailAddress; delay(3_000) } }
+        val M = com.kilon.agentvscreen.host.Tailnet.Mode.entries
+        Text("让其它设备连进来", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+        Text("默认关。打开后只有你自己 Tailscale 网络里的电脑或手机能连，走加密隧道，局域网和公网都连不到；令牌照样要。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            val labels = listOf("关", "内置 Tailscale", "Tailscale App")
+            M.forEachIndexed { i, m ->
+                SegmentedButton(selected = mode == m, onClick = {
+                    mode = m; ApiConfig.tailnetMode = m
+                    HostService.server?.start(ApiConfig.port)
+                    com.kilon.agentvscreen.host.Tailnet.sync(applicationContext)
+                }, shape = SegmentedButtonDefaults.itemShape(i, M.size), icon = {}) { Text(labels[i], fontSize = 12.sp, maxLines = 1) }
             }
-            if (tail) {
-                val a = tailAddr
-                if (a == null) Text("还没找到 Tailscale 地址：在这台手机上装好并登录 Tailscale，打开连接后 20 秒内自动生效。", fontSize = 12.sp, color = Palette.stopped)
-                else {
-                    val line = "VSCREEN_URL=http://$a:${ApiConfig.port} VSCREEN_TOKEN=$token vscreen status"
-                    Text("在你 tailnet 里的另一台设备上（装好 curl，先 curl -fsS http://$a:${ApiConfig.port}/cli > vscreen && chmod +x vscreen）：", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Code(line) { copy("远程调用示例", line) }
+        }
+        val remoteLine: @Composable (String) -> Unit = { host ->
+            val line = "VSCREEN_URL=http://$host:${ApiConfig.port} VSCREEN_TOKEN=$token vscreen status"
+            Text("在你 Tailscale 网络里的另一台设备上（装好 curl，先 curl -fsS http://$host:${ApiConfig.port}/cli > vscreen && chmod +x vscreen）：", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Code(line) { copy("远程调用示例", line) }
+        }
+        when (mode) {
+            com.kilon.agentvscreen.host.Tailnet.Mode.BUILTIN -> {
+                var key by remember { mutableStateOf("") }
+                var ctl by remember { mutableStateOf(ApiConfig.tailnetControlUrl ?: "") }
+                var more by remember { mutableStateOf(false) }
+                if (!com.kilon.agentvscreen.host.Tailnet.available(this@MainActivity)) {
+                    Text("这个安装包里没有内置 Tailscale 组件（只支持 arm64 手机）。", fontSize = 12.sp, color = Palette.stopped)
+                } else when {
+                    ts.loggedIn -> {
+                        Text("已连上 Tailscale：本机在你的网络里叫 ${ts.dnsName ?: ApiConfig.tailnetHostname}，地址 ${ts.ip}。" +
+                            (ts.user?.let { "账号 $it，" } ?: "") + "在线设备 ${ts.online} 台。" + (ts.lastPeer?.let { "最近来访：$it。" } ?: ""),
+                            fontSize = 12.sp, color = Palette.takeover)
+                        remoteLine(ts.ip!!)
+                        TextButton(onClick = { com.kilon.agentvscreen.host.Tailnet.logout() }) { Text("退出 Tailscale 登录") }
+                    }
+                    ts.needsLogin && ts.authUrl != null -> {
+                        Text("第一次使用要登录一次 Tailscale（之后会记住）。用你电脑上 Tailscale 的同一个账号登录。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(onClick = { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ts.authUrl))) } }, modifier = Modifier.fillMaxWidth()) { Text("在浏览器里登录 Tailscale") }
+                        TextButton(onClick = { copy("登录链接", ts.authUrl!!) }) { Text("复制登录链接（在电脑上打开也行）") }
+                    }
+                    ts.error != null -> Text("内置 Tailscale：${ts.error}（会自动重试）", fontSize = 12.sp, color = Palette.stopped)
+                    else -> Text("内置 Tailscale 正在启动（${ts.state}）…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = { more = !more }) { Text(if (more) "收起高级选项" else "高级：auth key、自建控制服务器") }
+                AnimatedVisibility(more) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        androidx.compose.material3.OutlinedTextField(key, { key = it }, label = { Text("auth key（可选，代替浏览器登录）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        androidx.compose.material3.OutlinedTextField(ctl, { ctl = it }, label = { Text("控制服务器（可选，如 Headscale 地址）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        OutlinedButton(onClick = {
+                            if (key.isNotBlank()) ApiConfig.tailnetAuthKey = key
+                            ApiConfig.tailnetControlUrl = ctl.ifBlank { null }
+                            key = ""
+                            com.kilon.agentvscreen.host.Tailnet.restart(applicationContext)
+                            Toast.makeText(this@MainActivity, "已保存，内置 Tailscale 重新连接中", Toast.LENGTH_SHORT).show()
+                        }) { Text("保存并重连") }
+                    }
                 }
             }
+            com.kilon.agentvscreen.host.Tailnet.Mode.SYSTEM -> {
+                val a = sysAddr
+                if (a == null) Text("还没找到 Tailscale 地址：在这台手机上装好并登录 Tailscale App，打开连接后 20 秒内自动生效。不想装 App 就选“内置 Tailscale”。", fontSize = 12.sp, color = Palette.stopped)
+                else remoteLine(a)
+            }
+            else -> {}
         }
     }
 

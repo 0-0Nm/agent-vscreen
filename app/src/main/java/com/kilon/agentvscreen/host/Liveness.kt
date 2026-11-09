@@ -20,6 +20,10 @@ import org.json.JSONObject
  *
  * Freezes are measured, not guessed: a 1 s ticker compares [SystemClock.uptimeMillis] gaps (uptime stops in deep
  * sleep, so a sleeping phone does not count; a frozen process with the CPU running does).
+ *
+ * 1.1.6: only freezes while the screen is on count against the setup ("screen-on freezes"). Vendor ROMs freeze even
+ * allowed apps for a while after the screen goes off (screen-off power saving); nobody is driving the phone then, and
+ * counting those made 系统后台管理 light up again every time the user came back to the app.
  */
 object Liveness {
     @Volatile var foreground = false; private set
@@ -29,6 +33,12 @@ object Liveness {
     @Volatile var lastFreezeMs = 0L; private set
     @Volatile var longestFreezeMs = 0L; private set
     @Volatile var lastFreezeWall = 0L; private set     // currentTimeMillis
+    /** 1.1.6: freezes while the screen stayed on (these hang a user's agent; screen-off ones do not count). */
+    @Volatile var screenOnFreezes = 0; private set
+    @Volatile var lastScreenOnFreezeWall = 0L; private set
+    @Volatile private var pm: android.os.PowerManager? = null
+    fun init(ctx: Context) { pm = ctx.getSystemService(android.os.PowerManager::class.java) }
+    private fun interactive(): Boolean = runCatching { pm?.isInteractive }.getOrNull() ?: true
     private var ticker: Thread? = null
 
     fun foregroundOk() { foreground = true; foregroundError = null }
@@ -42,22 +52,28 @@ object Liveness {
         if (ticker?.isAlive == true) return
         ticker = Thread({
             var last = SystemClock.uptimeMillis()
+            var wasOn = interactive()
             while (true) {
                 try { Thread.sleep(1_000) } catch (_: InterruptedException) { return@Thread }
                 val now = SystemClock.uptimeMillis()
                 val gap = now - last - 1_000
                 last = now
+                val on = interactive()
                 if (gap >= 3_000) {
                     freezes++; lastFreezeMs = gap; lastFreezeAt = SystemClock.elapsedRealtime(); lastFreezeWall = System.currentTimeMillis()
                     if (gap > longestFreezeMs) longestFreezeMs = gap
-                    AppLogger.warning("Liveness", "process was frozen for ${gap / 1000}s (system / vendor background manager)")
+                    // On before and after the gap: the user was using the phone while we were frozen.
+                    val screenOn = wasOn && on
+                    if (screenOn) { screenOnFreezes++; lastScreenOnFreezeWall = lastFreezeWall }
+                    AppLogger.warning("Liveness", "process was frozen for ${gap / 1000}s (${if (screenOn) "screen on" else "screen off: ignored for setup"})")
                 }
+                wasOn = on
             }
         }, "vscreen-liveness").apply { isDaemon = true; priority = Thread.MAX_PRIORITY }.also { it.start() }
     }
 
-    /** A freeze within the last 10 minutes. */
-    fun recentlyFrozen(): Boolean = freezes > 0 && SystemClock.elapsedRealtime() - lastFreezeAt < 10 * 60_000L
+    /** A screen-on freeze within the last 10 minutes. */
+    fun recentlyFrozen(): Boolean = screenOnFreezes > 0 && System.currentTimeMillis() - lastScreenOnFreezeWall < 10 * 60_000L
 
     /** What the user should know, or null when all is well. */
     fun problem(): String? = when {
@@ -75,6 +91,7 @@ object Liveness {
         .put("last_frozen_s", if (freezes > 0) lastFreezeMs / 1000 else JSONObject.NULL)
         .put("last_frozen_ago_s", if (freezes > 0) (SystemClock.elapsedRealtime() - lastFreezeAt) / 1000 else JSONObject.NULL)
         .put("longest_frozen_s", if (freezes > 0) longestFreezeMs / 1000 else JSONObject.NULL)
+        .put("frozen_screen_on_count", screenOnFreezes)
         .put("keep_alive_window", Presence.up)
         .put("pid", android.os.Process.myPid())
 
@@ -103,7 +120,7 @@ object Liveness {
      */
     fun vendorSetupDone(ctx: Context): Boolean {
         val at = prefs(ctx).getLong("vendor_bg_visited", 0L)
-        return at > 0L && lastFreezeWall < at
+        return at > 0L && lastScreenOnFreezeWall < at
     }
 
     fun openBackgroundSettings(ctx: Context): String {

@@ -12,3 +12,5 @@ keystore.properties
 .idea/
 *.iml
 .DS_Store
+# Built from tsbridge/ by tsbridge/build.sh (needs Go)
+app/src/main/jniLibs/arm64-v8a/libtsbridge.so

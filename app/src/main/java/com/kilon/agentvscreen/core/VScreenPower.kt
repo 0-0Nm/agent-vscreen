@@ -28,7 +28,6 @@ import org.json.JSONObject
  */
 internal object VScreenPower {
     private const val TAG = "VScreenPower"
-    @Volatile private var ensured = false
     @Volatile var lastFix: String? = null; private set
 
     data class Check(
@@ -100,13 +99,40 @@ internal object VScreenPower {
         return after.ok to msg
     }
 
-    /** Once per process, when Shizuku is ready and the app is not yet exempt. Never throws. */
+    /** Kept for callers: now the same self-healing as [heal], in the background. Never throws. */
     fun ensureOnce(ctx: Context) {
-        if (ensured || ShizukuManager.snapshot.value.state != ShizukuManager.State.READY) return
-        ensured = true
-        Thread {
-            runCatching { if (!check(ctx).ok) whitelist(ctx) }.onFailure { AppLogger.warning(TAG, "ensureOnce: ${it.message}") }
-        }.apply { isDaemon = true; name = "vscreen-power" }.start()
+        if (ShizukuManager.snapshot.value.state != ShizukuManager.State.READY) return
+        Thread { heal(ctx, "status") }.apply { isDaemon = true; name = "vscreen-power" }.start()
+    }
+
+    /** How often the system took back an exemption we had granted (vendor power managers do; Honor's on each open). */
+    @Volatile var resets = 0; private set
+    @Volatile var lastResetWhat: String? = null; private set
+    @Volatile private var lastHealAt = 0L
+    @Volatile private var everOk = false
+
+    /**
+     * 1.1.6 root fix for "电池优化和后台运行 shows as not set every time I open the app": these exemptions are not the
+     * user's to keep re-granting. Some ROMs take them back (on reboot, after a while, or when their own manager
+     * re-evaluates the app), and 1.1.5 re-granted only once per process, so the home page kept asking the user. Now
+     * every check that finds one missing grants it again through Shizuku (at most every 20 s), counts the reset, and the
+     * setup item only asks the user when Shizuku cannot fix it. Returns the state after healing. Never throws.
+     */
+    fun heal(ctx: Context, why: String): Check {
+        val before = runCatching { check(ctx) }.getOrNull() ?: return check(ctx)
+        if (before.ok) { everOk = true; return before }
+        if (ShizukuManager.snapshot.value.state != ShizukuManager.State.READY) return before
+        synchronized(this) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastHealAt < 20_000L) return check(ctx)
+            lastHealAt = now
+            if (everOk) { resets++; lastResetWhat = before.problems().joinToString("、") }
+        }
+        val (ok, msg) = runCatching { whitelist(ctx) }.getOrElse { false to (it.message ?: "失败") }
+        if (ok) everOk = true
+        AppLogger.info(TAG, "heal ($why): missing ${before.problems().joinToString("、")} -> ${if (ok) "fixed" else "still missing"}: $msg" +
+            if (resets > 0) " (system took it back $resets times)" else "")
+        return check(ctx)
     }
 
     /** What the user does by hand on this phone when Shizuku is not available. */

@@ -145,7 +145,7 @@ internal fun waitOn(d: VScreenDisplay, probe: Probe?, maxMs: Long, stop: Probe?)
         Thread.sleep(100)
         val el = SystemClock.elapsedRealtime() - t0
         if (BackgroundOperation.state.value.takeoverSessionId != null) throw ActionError("USER_TAKEOVER", "用户接管了副屏，这段停在这里")
-        if (BackgroundOperation.state.value.userStopped) throw ActionError("USER_STOPPED", "用户在悬浮窗上点了“停止”，这段停在这里：告诉用户，等用户点“交还 AI”")
+        if (BackgroundOperation.state.value.userStopped) throw ActionError("USER_STOPPED", BackgroundOperation.userStoppedMessage())
         stop?.poll()?.let { return WaitOut(null, it, el) }
         probe?.poll()?.let { return WaitOut(it, null, el) }
         if (el >= maxMs) return WaitOut(null, null, el)
