@@ -35,15 +35,23 @@ jobs:
           chmod +x gradlew tsbridge/build.sh
       - name: Run targeted display-health unit tests
         run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest'
+      - name: Stage targeted test artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -u
+          mkdir -p atvsx-targeted-test-results
+          cp -a app/build/test-results/testDebugUnitTest atvsx-targeted-test-results/ 2>/dev/null || true
+          cp -a app/build/reports/tests/testDebugUnitTest atvsx-targeted-test-results/ 2>/dev/null || true
+          find atvsx-targeted-test-results -type f -print | sort > atvsx-targeted-test-results/MANIFEST.txt
+          test -s atvsx-targeted-test-results/MANIFEST.txt || printf 'No Gradle XML/report files were produced\n' > atvsx-targeted-test-results/MANIFEST.txt
       - name: Preserve targeted test artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ATVSX-targeted-test-results-${{ github.run_number }}
-          path: |
-            app/build/test-results/testDebugUnitTest/**
-            app/build/reports/tests/testDebugUnitTest/**
-          if-no-files-found: warn
+          path: atvsx-targeted-test-results/
+          if-no-files-found: error
           retention-days: 14
       - name: Build Android arm64 Tailscale helper
         run: sh tsbridge/build.sh
