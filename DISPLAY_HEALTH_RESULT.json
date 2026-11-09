@@ -23,8 +23,17 @@
   "remote": {
     "base_commit": "8220279df3e73d5e75989496b9489ebe3d109d66",
     "branch": "fix/display-health",
-    "commit": null,
-    "workflow_run": null,
-    "artifact": null
+    "commit": "eb0a3656b9fb9b2a474fcd7ce4edf1bed8c4892b",
+    "successful_validation_commit": "806ecd4285d82d96a17b3c2b4ae23cc8db772f38",
+    "workflow_run": 42569683192,
+    "artifact": {
+      "id": 13652773099,
+      "name": "ATVSX-debug-3",
+      "digest": "sha256:94fe69b170fb452b1e88715eb43a74eb31fd5c5de472d53d6b404f9ac7d9c96b"
+    },
+    "later_runs": [
+      {"run": 42570397418, "conclusion": "failure", "reason": "Gradle 8.11.1 distribution download HTTP 504"},
+      {"run": 42570721627, "conclusion": "failure", "reason": "Gradle 8.11.1 distribution download HTTP 504"}
+    ]
   }
 }
