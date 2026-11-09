@@ -156,6 +156,8 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" > atvsx-artifacts/apk-badging.txt
           grep -q "package: name='com.kilon.agentvscreen.lab'" atvsx-artifacts/apk-badging.txt
           grep -q "application-label:'ATVSX'" atvsx-artifacts/apk-badging.txt
+          grep -q "versionCode='10'" atvsx-artifacts/apk-badging.txt
+          grep -q "versionName='1.1.6-atvsx.2'" atvsx-artifacts/apk-badging.txt
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > atvsx-artifacts/signature-verification.txt
           python3 - <<'PYCERT'
           import pathlib, re
