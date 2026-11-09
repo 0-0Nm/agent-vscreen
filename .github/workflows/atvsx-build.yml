@@ -68,7 +68,7 @@ jobs:
           "$DIR/gradle-8.11.1/bin/gradle" --version
       - uses: gradle/actions/setup-gradle@v4
       - name: Run targeted display-health unit tests
-        run: gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest' --tests 'com.kilon.agentvscreen.core.VScreenPowerPolicyTest' --tests 'com.kilon.agentvscreen.cmd.ScopedDumpTest' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test.dumpIsARealHandlerRouteNotJustHelp' --tests 'com.kilon.agentvscreen.core.VScreenDisplayServiceProtocolTest' --tests 'com.kilon.agentvscreen.ui.OverlayGeometryTest'
+        run: gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest' --tests 'com.kilon.agentvscreen.core.VScreenPowerPolicyTest' --tests 'com.kilon.agentvscreen.cmd.ScopedDumpTest' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test.dumpIsARealHandlerRouteNotJustHelp' --tests 'com.kilon.agentvscreen.core.VScreenDisplayServiceProtocolTest' --tests 'com.kilon.agentvscreen.ui.OverlayGeometryTest' --tests 'com.kilon.agentvscreen.core.FramePumpDiagnosticsTest'
       - name: Stage targeted test artifacts
         if: always()
         shell: bash
@@ -156,8 +156,8 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" > atvsx-artifacts/apk-badging.txt
           grep -q "package: name='com.kilon.agentvscreen.lab'" atvsx-artifacts/apk-badging.txt
           grep -q "application-label:'ATVSX'" atvsx-artifacts/apk-badging.txt
-          grep -q "versionCode='12'" atvsx-artifacts/apk-badging.txt
-          grep -q "versionName='1.1.6-atvsx.4'" atvsx-artifacts/apk-badging.txt
+          grep -q "versionCode='13'" atvsx-artifacts/apk-badging.txt
+          grep -q "versionName='1.1.6-atvsx.5'" atvsx-artifacts/apk-badging.txt
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > atvsx-artifacts/signature-verification.txt
           python3 - <<'PYCERT'
           import pathlib, re

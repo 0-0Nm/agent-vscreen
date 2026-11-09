@@ -14,6 +14,34 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+data class FramePumpDiagnostics(
+    val callbackCount: Long,
+    val acquireSuccessCount: Long,
+    val acquireNullCount: Long,
+    val acquireFailureCount: Long,
+    val convertBeginCount: Long,
+    val convertSuccessCount: Long,
+    val convertFailureCount: Long,
+    val publishCount: Long,
+    val pendingSetCount: Long,
+    val pendingPresent: Boolean,
+    val pendingCloseFailureCount: Long,
+    val callbackLastAtMs: Long,
+    val acquireLastAtMs: Long,
+    val convertBeginLastAtMs: Long,
+    val convertSuccessLastAtMs: Long,
+    val convertFailureLastAtMs: Long,
+    val publishLastAtMs: Long,
+    val pendingCloseFailureLastAtMs: Long,
+    val lastFrameAtMs: Long,
+    val publishedVersion: Long,
+    val lastReceivedAtMs: Long,
+    val lastConvertedAtMs: Long,
+    val parked: Boolean,
+    val threadAlive: Boolean,
+    val lastAcquireError: String?,
+)
+
 /**
  * [vscreen] One agent-owned virtual display plus its frame pump.
  *
@@ -56,6 +84,30 @@ class VScreenDisplay private constructor(
     /** VIRTUAL_DISPLAY_FLAG_* actually granted (0 = unknown / app-owned fallback). */
     val flags: Int = 0,
 ) {
+    private class PumpCounters {
+        val callback = java.util.concurrent.atomic.AtomicLong()
+        val acquireSuccess = java.util.concurrent.atomic.AtomicLong()
+        val acquireNull = java.util.concurrent.atomic.AtomicLong()
+        val acquireFailure = java.util.concurrent.atomic.AtomicLong()
+        val convertBegin = java.util.concurrent.atomic.AtomicLong()
+        val convertSuccess = java.util.concurrent.atomic.AtomicLong()
+        val convertFailure = java.util.concurrent.atomic.AtomicLong()
+        val publish = java.util.concurrent.atomic.AtomicLong()
+        val pendingSet = java.util.concurrent.atomic.AtomicLong()
+        val pendingCloseFailure = java.util.concurrent.atomic.AtomicLong()
+        val callbackLastAtMs = java.util.concurrent.atomic.AtomicLong()
+        val acquireLastAtMs = java.util.concurrent.atomic.AtomicLong()
+        val convertBeginLastAtMs = java.util.concurrent.atomic.AtomicLong()
+        val convertSuccessLastAtMs = java.util.concurrent.atomic.AtomicLong()
+        val convertFailureLastAtMs = java.util.concurrent.atomic.AtomicLong()
+        val publishLastAtMs = java.util.concurrent.atomic.AtomicLong()
+        val pendingCloseFailureLastAtMs = java.util.concurrent.atomic.AtomicLong()
+        val lastAcquireLogAtMs = java.util.concurrent.atomic.AtomicLong()
+        @Volatile var lastAcquireError: String? = null
+    }
+    private val pumpCounters = PumpCounters()
+    @Volatile private var pendingPresent = false
+
     // ── orientation ─────────────────────────────────────────────────────────
     // The display is created ROTATES_WITH_CONTENT: when a landscape app (a game) asks for
     // landscape, the LOGICAL display rotates (input and the app use 2800x1264) while the surface
@@ -216,34 +268,61 @@ class VScreenDisplay private constructor(
     /** Pump-thread only: the newest frame skipped by the throttle, converted when the throttle opens. */
     private var pending: android.media.Image? = null
     private var pumpHandler: Handler? = null
+    private fun closePending(image: android.media.Image?) {
+        if (image == null) return
+        try { image.close() } catch (t: Throwable) {
+            val now = SystemClock.elapsedRealtime()
+            pumpCounters.pendingCloseFailure.incrementAndGet()
+            pumpCounters.pendingCloseFailureLastAtMs.set(now)
+            AppLogger.warning(TAG, "pending image close failed: ${t.message}")
+        } finally { pendingPresent = false }
+    }
     private val flushPending = Runnable {
         val p = pending ?: return@Runnable
         pending = null
+        pendingPresent = false
         convert(p)
     }
 
     private fun startPump() {
         val h = Handler(thread.looper).also { pumpHandler = it }
         reader.setOnImageAvailableListener({ r ->
-            // Always acquire, and never hold more than one image (the pending one):
-            // the queue must never fill up.
-            val img = runCatching { r.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
-            val now = SystemClock.elapsedRealtime()
+            // Always try to acquire, and never hold more than one image. A normal null from
+            // acquireLatestImage means the queue was already drained; it is not a failure.
+            val callbackAt = SystemClock.elapsedRealtime()
+            pumpCounters.callback.incrementAndGet()
+            pumpCounters.callbackLastAtMs.set(callbackAt)
+            val img = try { r.acquireLatestImage() } catch (t: Throwable) {
+                pumpCounters.acquireFailure.incrementAndGet()
+                pumpCounters.acquireLastAtMs.set(callbackAt)
+                pumpCounters.lastAcquireError = "${t.javaClass.simpleName}: ${t.message}"
+                val prev = pumpCounters.lastAcquireLogAtMs.get()
+                if (callbackAt - prev >= 1_000L && pumpCounters.lastAcquireLogAtMs.compareAndSet(prev, callbackAt)) {
+                    AppLogger.warning(TAG, "acquireLatestImage failed: ${pumpCounters.lastAcquireError}")
+                }
+                return@setOnImageAvailableListener
+            }
+            if (img == null) {
+                pumpCounters.acquireNull.incrementAndGet()
+                return@setOnImageAvailableListener
+            }
+            pumpCounters.acquireSuccess.incrementAndGet()
+            pumpCounters.acquireLastAtMs.set(callbackAt)
+            val now = callbackAt
             lastFrameAtMs = now
             val wait = frameInterval - (now - lastConvertMs)
             if (wait > 0 && latest != null) {
-                // Throttled. Keep this frame as the trailing one instead of dropping it:
-                // otherwise the LAST frame of an animation (a list snapping back, a page
-                // sliding in) can be lost and a static screen keeps showing a mid-animation
-                // picture (e.g. two stacked title bars) until something else redraws.
-                runCatching { pending?.close() }
+                // Throttled. Keep this frame as the trailing one instead of dropping it.
+                closePending(pending)
                 pending = img
+                pendingPresent = true
+                pumpCounters.pendingSet.incrementAndGet()
                 h.removeCallbacks(flushPending)
                 h.postDelayed(flushPending, wait)
                 return@setOnImageAvailableListener
             }
             h.removeCallbacks(flushPending)
-            runCatching { pending?.close() }
+            closePending(pending)
             pending = null
             convert(img)
         }, h)
@@ -251,9 +330,11 @@ class VScreenDisplay private constructor(
 
     /** Convert [img] into the shared bitmap and close it. Pump thread only. */
     private fun convert(img: android.media.Image) {
+        val beginAt = SystemClock.elapsedRealtime()
+        pumpCounters.convertBegin.incrementAndGet()
+        pumpCounters.convertBeginLastAtMs.set(beginAt)
         try {
             if (released) return
-            val convertedAt = SystemClock.elapsedRealtime()
             val plane = img.planes[0]
             val pixelStride = plane.pixelStride
             val rowStride = plane.rowStride
@@ -272,14 +353,22 @@ class VScreenDisplay private constructor(
             // The old bitmap is NOT recycled: a preview frame may still be
             // drawing it. Letting the GC reclaim it is the safe choice.
             synchronized(frameLock) {
+                val publishedAt = SystemClock.elapsedRealtime()
                 latestRaw = exact
                 latestTurn = turn
                 latestReceivedAtMs = lastFrameAtMs
-                latestConvertedAtMs = convertedAt
-                lastConvertMs = convertedAt
+                latestConvertedAtMs = publishedAt
+                lastConvertMs = publishedAt
                 _frameVersion.value = _frameVersion.value + 1
+                pumpCounters.publish.incrementAndGet()
+                pumpCounters.publishLastAtMs.set(publishedAt)
+                pumpCounters.convertSuccess.incrementAndGet()
+                pumpCounters.convertSuccessLastAtMs.set(publishedAt)
             }
         } catch (t: Throwable) {
+            val failedAt = SystemClock.elapsedRealtime()
+            pumpCounters.convertFailure.incrementAndGet()
+            pumpCounters.convertFailureLastAtMs.set(failedAt)
             AppLogger.warning(TAG, "frame convert failed on display $displayId: ${t.message}")
         } finally {
             runCatching { img.close() }
@@ -287,6 +376,38 @@ class VScreenDisplay private constructor(
     }
 
     private val frameLock = Any()
+
+    fun publishedFrameState(): VScreenDisplayHealth.PublishedFrame = synchronized(frameLock) {
+        VScreenDisplayHealth.PublishedFrame(_frameVersion.value, latestConvertedAtMs)
+    }
+
+    fun diagnostics(): FramePumpDiagnostics = FramePumpDiagnostics(
+        callbackCount = pumpCounters.callback.get(),
+        acquireSuccessCount = pumpCounters.acquireSuccess.get(),
+        acquireNullCount = pumpCounters.acquireNull.get(),
+        acquireFailureCount = pumpCounters.acquireFailure.get(),
+        convertBeginCount = pumpCounters.convertBegin.get(),
+        convertSuccessCount = pumpCounters.convertSuccess.get(),
+        convertFailureCount = pumpCounters.convertFailure.get(),
+        publishCount = pumpCounters.publish.get(),
+        pendingSetCount = pumpCounters.pendingSet.get(),
+        pendingPresent = pendingPresent,
+        pendingCloseFailureCount = pumpCounters.pendingCloseFailure.get(),
+        callbackLastAtMs = pumpCounters.callbackLastAtMs.get(),
+        acquireLastAtMs = pumpCounters.acquireLastAtMs.get(),
+        convertBeginLastAtMs = pumpCounters.convertBeginLastAtMs.get(),
+        convertSuccessLastAtMs = pumpCounters.convertSuccessLastAtMs.get(),
+        convertFailureLastAtMs = pumpCounters.convertFailureLastAtMs.get(),
+        publishLastAtMs = pumpCounters.publishLastAtMs.get(),
+        pendingCloseFailureLastAtMs = pumpCounters.pendingCloseFailureLastAtMs.get(),
+        lastFrameAtMs = lastFrameAtMs,
+        publishedVersion = _frameVersion.value,
+        lastReceivedAtMs = latestReceivedAtMs,
+        lastConvertedAtMs = latestConvertedAtMs,
+        parked = parked,
+        threadAlive = thread.isAlive,
+        lastAcquireError = pumpCounters.lastAcquireError,
+    )
 
     /** The most recent converted frame, or null before the first frame. Do not recycle it. */
     fun latestFrame(): Bitmap? = latest
@@ -310,6 +431,7 @@ class VScreenDisplay private constructor(
     fun unpark(): String {
         if (!parked || released) { parked = false; return "副屏在运行" }
         val t0 = SystemClock.elapsedRealtime()
+        val baseline = publishedFrameState()
         fun attach(): Boolean = if (shellOwned) VScreenRemoteDisplay.setSurface(displayId, reader.surface).isSuccess
             else runCatching { virtualDisplay?.surface = reader.surface; true }.getOrDefault(false)
         var ok = attach()
@@ -317,11 +439,13 @@ class VScreenDisplay private constructor(
         boost(3_000)
         val deadline = t0 + 3_000
         var halfRetried = false
-        while (SystemClock.elapsedRealtime() < deadline && lastFrameAtMs < t0) {
+        var published = publishedFrameState()
+        while (SystemClock.elapsedRealtime() < deadline && !VScreenDisplayHealth.unparkRecovered(published, baseline, t0)) {
             if (!halfRetried && SystemClock.elapsedRealtime() - t0 > 1_500) { halfRetried = true; ok = attach() || ok }
             Thread.sleep(50)
+            published = publishedFrameState()
         }
-        val woke = lastFrameAtMs >= t0
+        val woke = VScreenDisplayHealth.unparkRecovered(published, baseline, t0)
         return when {
             woke -> "副屏刚从省电暂停中恢复（${SystemClock.elapsedRealtime() - t0}ms），页面保留；应用可能刚回到前台，先 read 确认"
             ok -> "副屏已从省电暂停中恢复，但还没收到新画面（静止页面可能不重绘）；先 read 确认"
@@ -417,11 +541,11 @@ class VScreenDisplay private constructor(
         // whole process (seen right after a rebuild), which took the screen and the chat down.
         val queued = h != null && runCatching {
             h.post {
-                runCatching { pending?.close() }; pending = null
+                closePending(pending); pending = null
                 runCatching { reader.close() }
             }
         }.getOrDefault(false)
-        if (!queued) { runCatching { pending?.close() }; pending = null; runCatching { reader.close() } }
+        if (!queued) { closePending(pending); pending = null; runCatching { reader.close() } }
         runCatching { thread.quitSafely() }
         latestRaw = null
     }
