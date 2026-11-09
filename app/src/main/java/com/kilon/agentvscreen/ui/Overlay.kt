@@ -268,7 +268,11 @@ object Overlay {
 
     internal fun place(x: Int, y: Int) {
         val v = root ?: return; val l = lp ?: return
-        l.x = x; l.y = y.coerceIn(if (docked.value) 0 else -(winH() * 0.6f).toInt(), screenH() - dp(48f).toInt())
+        val h = winH()
+        val minY = if (docked.value || !h.isFinite()) 0f else -(h * 0.6f)
+        val maxY = (screenH().toFloat() - dp(48f)).coerceAtLeast(0f)
+        l.x = x
+        l.y = OverlayGeometry.rangeClamp(y.toFloat(), minY, maxY).toInt()
         runCatching { hostWm?.updateViewLayout(v, l) }
     }
 
