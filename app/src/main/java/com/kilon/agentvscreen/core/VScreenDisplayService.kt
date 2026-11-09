@@ -625,7 +625,8 @@ class VScreenDisplayService : Binder {
     /** Call the per-display IPowerManager overload from the shell UserService. */
     private fun userActivity(displayId: Int): Boolean = runCatching {
         if (displayId <= 0 || displayManager().getDisplay(displayId) == null) return false
-        val pm = getSystemService(POWER_SERVICE) as? android.os.PowerManager ?: return false
+        val ctx = ShellContext(base ?: systemContext())
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager ?: return false
         val field = pm.javaClass.getDeclaredField("mService").apply { isAccessible = true }
         val service = field.get(pm) ?: return false
         val method = service.javaClass.methods.firstOrNull { m ->
