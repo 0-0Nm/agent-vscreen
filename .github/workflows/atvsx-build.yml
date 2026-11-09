@@ -33,6 +33,7 @@ jobs:
           sha256sum app/src/main/assets/vscreen-ocr/*.onnx
           sdkmanager "platforms;android-36" "build-tools;35.0.0"
           chmod +x gradlew tsbridge/build.sh
+      - uses: gradle/actions/setup-gradle@v4
       - name: Run targeted display-health unit tests
         run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest'
       - name: Stage targeted test artifacts
@@ -41,10 +42,17 @@ jobs:
         run: |
           set -u
           mkdir -p atvsx-targeted-test-results
-          cp -a app/build/test-results/testDebugUnitTest atvsx-targeted-test-results/ 2>/dev/null || true
-          cp -a app/build/reports/tests/testDebugUnitTest atvsx-targeted-test-results/ 2>/dev/null || true
-          find atvsx-targeted-test-results -type f -print | sort > atvsx-targeted-test-results/MANIFEST.txt
-          test -s atvsx-targeted-test-results/MANIFEST.txt || printf 'No Gradle XML/report files were produced\n' > atvsx-targeted-test-results/MANIFEST.txt
+          cp -a .atvsx-build/app/test-results/testDebugUnitTest atvsx-targeted-test-results/ 2>/dev/null || true
+          cp -a .atvsx-build/app/reports/tests/testDebugUnitTest atvsx-targeted-test-results/ 2>/dev/null || true
+          python3 - <<'PYTEST'
+          import json, pathlib, xml.etree.ElementTree as ET
+          root = pathlib.Path('atvsx-targeted-test-results')
+          files = list(root.rglob('TEST-*.xml'))
+          suites = [ET.parse(p).getroot() for p in files]
+          summary = {'xml_files': len(files), 'tests': sum(int(x.get('tests', 0)) for x in suites), 'failures': sum(int(x.get('failures', 0)) for x in suites), 'errors': sum(int(x.get('errors', 0)) for x in suites), 'skipped': sum(int(x.get('skipped', 0)) for x in suites), 'reports_present': bool(files)}
+          (root / 'SUMMARY.json').write_text(json.dumps(summary, indent=2))
+          print(json.dumps(summary))
+          PYTEST
       - name: Preserve targeted test artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -53,6 +61,14 @@ jobs:
           path: atvsx-targeted-test-results/
           if-no-files-found: error
           retention-days: 14
+      - name: Require actual passing JUnit results
+        shell: bash
+        run: |
+          python3 - <<'PYTEST'
+          import json
+          s = json.load(open('atvsx-targeted-test-results/SUMMARY.json'))
+          assert s['reports_present'] and s['tests'] >= 10 and s['failures'] == 0 and s['errors'] == 0 and s['skipped'] == 0, s
+          PYTEST
       - name: Build Android arm64 Tailscale helper
         run: sh tsbridge/build.sh
       - name: Assemble coexist debug APK

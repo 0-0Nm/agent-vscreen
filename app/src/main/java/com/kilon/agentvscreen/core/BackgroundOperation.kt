@@ -919,6 +919,7 @@ object BackgroundOperation {
             generationMatches = expectedGeneration == null || expectedGeneration == d.generation,
             rereadRequired = task.rereadRequired,
             freshPage = freshPage,
+            isRead = isRead,
         )) {
             VScreenDisplayHealth.PreActionBlock.USER_STOPPED -> throw ActionError("USER_STOPPED", userStoppedMessage())
             VScreenDisplayHealth.PreActionBlock.TAKEOVER -> throw ActionError("USER_TAKEOVER", "用户正在接管副屏，动作没有执行")

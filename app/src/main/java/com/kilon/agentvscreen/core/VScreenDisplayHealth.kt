@@ -5,11 +5,11 @@ internal object VScreenDisplayHealth {
     enum class PreActionBlock { NONE, USER_STOPPED, TAKEOVER, STALE_GENERATION, REREAD }
 
     /** Pure ordering contract for the checks that must precede the wake/action gate. */
-    fun preActionBlock(userStopped: Boolean, takeover: Boolean, generationMatches: Boolean, rereadRequired: Boolean, freshPage: Boolean): PreActionBlock = when {
+    fun preActionBlock(userStopped: Boolean, takeover: Boolean, generationMatches: Boolean, rereadRequired: Boolean, freshPage: Boolean, isRead: Boolean): PreActionBlock = when {
         userStopped -> PreActionBlock.USER_STOPPED
         takeover -> PreActionBlock.TAKEOVER
         !generationMatches -> PreActionBlock.STALE_GENERATION
-        rereadRequired && !freshPage -> PreActionBlock.REREAD
+        !isRead && rereadRequired && !freshPage -> PreActionBlock.REREAD
         else -> PreActionBlock.NONE
     }
 

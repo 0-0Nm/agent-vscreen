@@ -25,18 +25,18 @@ class DisplayHealthGuardTest {
 
     @Test fun preActionGateChecksSafetyBeforeWakeGate() {
         assertEquals(VScreenDisplayHealth.PreActionBlock.USER_STOPPED,
-            VScreenDisplayHealth.preActionBlock(userStopped = true, takeover = true, generationMatches = false, rereadRequired = true, freshPage = false))
+            VScreenDisplayHealth.preActionBlock(userStopped = true, takeover = true, generationMatches = false, rereadRequired = true, freshPage = false, isRead = false))
         assertEquals(VScreenDisplayHealth.PreActionBlock.TAKEOVER,
-            VScreenDisplayHealth.preActionBlock(userStopped = false, takeover = true, generationMatches = false, rereadRequired = true, freshPage = false))
+            VScreenDisplayHealth.preActionBlock(userStopped = false, takeover = true, generationMatches = false, rereadRequired = true, freshPage = false, isRead = false))
         assertEquals(VScreenDisplayHealth.PreActionBlock.STALE_GENERATION,
-            VScreenDisplayHealth.preActionBlock(userStopped = false, takeover = false, generationMatches = false, rereadRequired = true, freshPage = false))
+            VScreenDisplayHealth.preActionBlock(userStopped = false, takeover = false, generationMatches = false, rereadRequired = true, freshPage = false, isRead = false))
         assertEquals(VScreenDisplayHealth.PreActionBlock.REREAD,
-            VScreenDisplayHealth.preActionBlock(userStopped = false, takeover = false, generationMatches = true, rereadRequired = true, freshPage = false))
+            VScreenDisplayHealth.preActionBlock(userStopped = false, takeover = false, generationMatches = true, rereadRequired = true, freshPage = false, isRead = false))
     }
 
     @Test fun freshPageClearsRereadOnlyForTheGate() {
         assertEquals(VScreenDisplayHealth.PreActionBlock.NONE,
-            VScreenDisplayHealth.preActionBlock(userStopped = false, takeover = false, generationMatches = true, rereadRequired = true, freshPage = true))
+            VScreenDisplayHealth.preActionBlock(userStopped = false, takeover = false, generationMatches = true, rereadRequired = true, freshPage = true, isRead = false))
     }
 
     @Test fun missingFrameIsNotCalledCached() {
@@ -51,5 +51,18 @@ class DisplayHealthGuardTest {
             "取帧未收到新帧（缓存年龄 1200ms）：画面仅作诊断证据，不能证明刚刚响应",
             VScreenDisplayHealth.cachedFrameNote(hasFrame = true, fresh = false, ageMs = 1200),
         )
+    }
+    @Test fun readObservationMayPassRereadGate() {
+        assertEquals(VScreenDisplayHealth.PreActionBlock.NONE,
+            VScreenDisplayHealth.preActionBlock(false, false, true, true, false, isRead = true))
+    }
+
+    @Test fun readObservationStillHonorsStopTakeoverAndGeneration() {
+        assertEquals(VScreenDisplayHealth.PreActionBlock.USER_STOPPED,
+            VScreenDisplayHealth.preActionBlock(true, false, true, true, false, isRead = true))
+        assertEquals(VScreenDisplayHealth.PreActionBlock.TAKEOVER,
+            VScreenDisplayHealth.preActionBlock(false, true, true, true, false, isRead = true))
+        assertEquals(VScreenDisplayHealth.PreActionBlock.STALE_GENERATION,
+            VScreenDisplayHealth.preActionBlock(false, false, false, true, false, isRead = true))
     }
 }
