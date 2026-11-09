@@ -68,7 +68,7 @@ jobs:
           "$DIR/gradle-8.11.1/bin/gradle" --version
       - uses: gradle/actions/setup-gradle@v4
       - name: Run targeted display-health unit tests
-        run: gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest' --tests 'com.kilon.agentvscreen.cmd.ScopedDumpTest' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test.dumpIsARealHandlerRouteNotJustHelp'
+        run: gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest' --tests 'com.kilon.agentvscreen.core.VScreenPowerPolicyTest' --tests 'com.kilon.agentvscreen.cmd.ScopedDumpTest' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test.dumpIsARealHandlerRouteNotJustHelp' --tests 'com.kilon.agentvscreen.core.VScreenDisplayServiceProtocolTest'
       - name: Stage targeted test artifacts
         if: always()
         shell: bash
@@ -174,3 +174,4 @@ jobs:
           path: atvsx-artifacts/
           if-no-files-found: error
           retention-days: 14
+
