@@ -120,11 +120,11 @@ class ApiServer(private val ctx: Context) {
             val txt = String(buf, 0, n, Charsets.UTF_8)
             if ("agent-vscreen" in txt) {
                 val pid = Regex("\"pid\":(\\d+)").find(txt)?.groupValues?.get(1)
-                "另一个 Agent-VScreen 进程${pid?.let { "（pid $it）" } ?: ""}还占着它，旧进程退出后就会接上"
+                "另一个 ATVSX 进程${pid?.let { "（pid $it）" } ?: ""}还占着它，旧进程退出后就会接上"
             } else "别的程序在用这个端口：可以在“接入 agent”里换一个端口，再重新复制接入命令"
         }
     } catch (e: java.net.SocketTimeoutException) {
-        "占着它的进程没有响应，多半是被系统冻结、还没退出的旧 Agent-VScreen 进程"
+        "占着它的进程没有响应，多半是被系统冻结、还没退出的旧 ATVSX 进程"
     } catch (e: Exception) {
         "端口刚刚被放开"
     }
@@ -271,7 +271,7 @@ class ApiServer(private val ctx: Context) {
             "/skill" -> return Resp.text(AgentGuide.skill())
             "/memory" -> return Resp.text(AgentGuide.memory() + "\n")
         }
-        if (!authorized(r)) return Resp.err(401, "BAD_TOKEN", "缺少或错误的令牌：在 Agent-VScreen 里复制接入命令/令牌（Authorization: Bearer <令牌>）")
+        if (!authorized(r)) return Resp.err(401, "BAD_TOKEN", "缺少或错误的令牌：在 ATVSX 里复制接入命令/令牌（Authorization: Bearer <令牌>）")
         lastClient = r.headers["user-agent"]?.take(60)
         lastCaller = r.caller
         return when {
@@ -310,7 +310,7 @@ class ApiServer(private val ctx: Context) {
                 val where = argv.drop(1).joinToString(" ").trim()
                 if (where.isEmpty()) return NativeOffloadResult(2, "用法：vscreen remembered \"<你把说明存在了哪里>\"（例如：长期记忆 / skills/agent-vscreen）\n")
                 AgentLedger.remembered(where)
-                return NativeOffloadResult(0, "已记录：你说把 Agent-VScreen 的说明存在了「${where.take(80)}」。App 首页会显示给用户。以后的新对话里，要操作手机应用时用 vscreen（不知道怎么用就先 vscreen guide）。\n")
+                return NativeOffloadResult(0, "已记录：你说把 ATVSX 的说明存在了「${where.take(80)}」。App 首页会显示给用户。以后的新对话里，要操作手机应用时用 vscreen（不知道怎么用就先 vscreen guide）。\n")
             }
         }
         com.kilon.agentvscreen.host.A11yHeal.maybeHeal(ctx, "command")
@@ -319,7 +319,7 @@ class ApiServer(private val ctx: Context) {
             val res = handler.handle(NativeOffloadRequest(listOf("vscreen") + argv, session))
             // First call after a long silence (likely a new conversation): one line pointing at the short usage.
             if (!fresh || argv.first() == "help") return res
-            return res.copy(output = res.output.trimEnd() + "\n\n（Agent-VScreen：用法速查 `vscreen guide`；完整说明 `vscreen help all`。）\n")
+            return res.copy(output = res.output.trimEnd() + "\n\n（ATVSX：用法速查 `vscreen guide`；完整说明 `vscreen help all`。）\n")
         }
         finally { Turns.end(session) }
     }

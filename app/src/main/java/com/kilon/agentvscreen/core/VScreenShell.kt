@@ -321,13 +321,13 @@ internal object VScreenShell {
     fun vendorHints(): List<String> = when (device().vendor) {
         "vivo" -> listOf(
             "开发者选项里打开“禁止权限监控”：否则 Shizuku 下的输入注入、wm/settings 命令可能被系统拦截（点击无效或命令失败）",
-            "i管家 › 应用管理 › 权限管理 › 自启动 允许 Agent-VScreen 和 Shizuku；设置 › 电池 › 后台耗电管理 选“允许后台高耗电”，否则后台副屏会被杀",
+            "i管家 › 应用管理 › 权限管理 › 自启动 允许 ATVSX 和 Shizuku；设置 › 电池 › 后台耗电管理 选“允许后台高耗电”，否则后台副屏会被杀",
             "Shizuku 用无线调试启动时，锁屏久了 OriginOS 可能断开无线调试：status 报 not_connected 时用 fix 重连",
             "iQOO 电竞模式/游戏魔盒会拦截通知和悬浮窗：在副屏跑游戏时不要对该游戏开“免打扰/极速模式”",
         )
-        "honor", "huawei" -> listOf("设置 › 应用和服务 › 应用启动管理 把 Agent-VScreen 和 Shizuku 设为手动管理并全部允许")
+        "honor", "huawei" -> listOf("设置 › 应用和服务 › 应用启动管理 把 ATVSX 和 Shizuku 设为手动管理并全部允许")
         "xiaomi" -> listOf("开发者选项里打开“USB 调试（安全设置）”，否则输入注入会被拒绝；省电策略选“无限制”")
-        "oppo" -> listOf("设置 › 电池 › 应用耗电管理 允许 Agent-VScreen 和 Shizuku 后台运行")
+        "oppo" -> listOf("设置 › 电池 › 应用耗电管理 允许 ATVSX 和 Shizuku 后台运行")
         else -> emptyList()
     }
 
@@ -406,7 +406,7 @@ internal object VScreenShell {
     fun stop(displayId: Int, pkg: String?): Outcome {
         val target = pkg?.trim()?.takeIf { it.isNotEmpty() } ?: topPackage(displayId)
             ?: return ok("副屏 $displayId 上没有应用")
-        if (isProtected(target)) return fail("PROTECTED_APP", "$target 是 Agent-VScreen 自己、桌面或系统界面，不能 force-stop（会中断任务或打断用户）")
+        if (isProtected(target)) return fail("PROTECTED_APP", "$target 是 ATVSX 自己、桌面或系统界面，不能 force-stop（会中断任务或打断用户）")
         val r = run(arrayOf("am", "force-stop", target), 8_000L)
         return if (r.exitCode == 0) ok("已结束 $target（force-stop 会结束该应用的所有页面，包括主屏上的）")
         else fail("OPERATION_FAILED", r.combined)

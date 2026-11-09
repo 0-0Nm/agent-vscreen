@@ -355,9 +355,9 @@ object BackgroundOperation {
         refreshStatus()
         val s = _state.value
         val error: String? = when (s.privilege) {
-            Privilege.NOT_INSTALLED -> "未安装 Shizuku：请用户安装并启动 Shizuku（或 Sui），再打开 Agent-VScreen 授权"
+            Privilege.NOT_INSTALLED -> "未安装 Shizuku：请用户安装并启动 Shizuku（或 Sui），再打开 ATVSX 授权"
             Privilege.NOT_RUNNING -> "Shizuku 服务未启动，请用无线调试启动后重试"
-            Privilege.NOT_AUTHORIZED -> "Agent-VScreen 尚未获得 Shizuku 授权"
+            Privilege.NOT_AUTHORIZED -> "ATVSX 尚未获得 Shizuku 授权"
             Privilege.READY -> {
                 val r = VScreenShell.run(arrayOf("id"), 5_000L)
                 if (r.exitCode != 0) "特权通道无响应：${r.combined.take(160)}"
@@ -570,7 +570,7 @@ object BackgroundOperation {
         val at = _state.value.stoppedAt
         val whenText = if (at > 0) java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(at)) + " " else ""
         return "用户在 ${whenText}按了悬浮窗上的“停止 AI”，所以你的操作现在都会被拒绝（动作没有执行）。这是用户的安全开关，你解除不了，不要重试。" +
-            "请原样转告用户：要让我继续，下拉通知栏，在“已停止 AI”那条通知上点“允许继续”；也可以点悬浮窗上的“交还 AI”，或打开 Agent-VScreen 首页点“允许继续”。"
+            "请原样转告用户：要让我继续，下拉通知栏，在“已停止 AI”那条通知上点“允许继续”；也可以点悬浮窗上的“交还 AI”，或打开 ATVSX 首页点“允许继续”。"
     }
 
     fun setTitle(sessionId: String, title: String?) {
@@ -616,13 +616,13 @@ object BackgroundOperation {
         val sid = sessionId?.takeIf { it.isNotEmpty() }
             ?: throw ActionError("NO_SESSION", "没有会话（请求头 X-VScreen-Session）")
         val s0 = _state.value
-        if (!s0.enabled) throw ActionError("DISABLED", "Agent-VScreen 的服务已被用户关闭。请用户打开 Agent-VScreen 点“启动服务”")
+        if (!s0.enabled) throw ActionError("DISABLED", "ATVSX 的服务已被用户关闭。请用户打开 ATVSX 点“启动服务”")
         if (s0.connection != Connection.READY) {
             // Standalone: only the user's own 停止并释放 needs the user; a lost Shizuku that came back reconnects here.
             if (s0.needsExplicitReconnect && s0.connection == Connection.DISCONNECTED) {
                 throw ActionError(
                     "NOT_CONNECTED",
-                    "后台连接未就绪（${s0.connectionError ?: "需要明确重连"}）。请用户打开 Agent-VScreen 点“连接”，或执行 vscreen fix not_connected。不会改为在主屏操作。",
+                    "后台连接未就绪（${s0.connectionError ?: "需要明确重连"}）。请用户打开 ATVSX 点“连接”，或执行 vscreen fix not_connected。不会改为在主屏操作。",
                 )
             }
             // Enabled, never connected and never stopped: verify the channel once.
@@ -678,7 +678,7 @@ object BackgroundOperation {
                     setupGeometry(d)
                     if (!tasks.containsKey(sid)) tasks[sid] = TaskInfo(sid)
                     val prevPid = runCatching { prefs.getInt(K_HOST_PID, 0) }.getOrDefault(0)
-                    val why = "Agent-VScreen 进程重启过（${if (prevPid > 0) "原进程 $prevPid，" else ""}现进程 ${android.os.Process.myPid()}），" +
+                    val why = "ATVSX 进程重启过（${if (prevPid > 0) "原进程 $prevPid，" else ""}现进程 ${android.os.Process.myPid()}），" +
                         "上一轮的任务已中断：副屏上的页面、计数和计划都可能和你记得的不一样"
                     tasks[sid]?.let { it.rereadRequired = true; it.rereadReason = why }
                     hostRestartNote = why

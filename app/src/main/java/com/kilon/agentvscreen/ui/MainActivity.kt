@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
     private fun diagnostics(items: List<Setup.Item>): String {
         val s = BackgroundOperation.state.value
         return buildString {
-            appendLine("Agent-VScreen ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL}")
+            appendLine("ATVSX ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL}")
             appendLine("服务：${if (HostService.isAlive) "运行中" else "已停止"} · 127.0.0.1:${ApiConfig.port} · ${HostService.server?.lastError ?: "无错误"}")
             appendLine("后台：${com.kilon.agentvscreen.host.Liveness.json()}")
             appendLine("连接：${s.connection}${s.connectionError?.let { "（$it）" } ?: ""} · 副屏 ${s.displayId ?: "无"} ${s.screenWidth}x${s.screenHeight} · 会话 ${s.ownerSessionId ?: "-"} · ${Palette.word(modeOf(s))}")
@@ -175,7 +175,7 @@ class MainActivity : ComponentActivity() {
             com.kilon.agentvscreen.host.Liveness.problem()?.let { p ->
                 Banner("后台运行受限", p, Palette.stopped, "去设置") {
                     val opened = com.kilon.agentvscreen.host.Liveness.openBackgroundSettings(this@MainActivity)
-                    Toast.makeText(this@MainActivity, "已打开：$opened。把 Agent-VScreen 设为允许自启动、关联启动和后台活动", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, "已打开：$opened。把 ATVSX 设为允许自启动、关联启动和后台活动", Toast.LENGTH_LONG).show()
                 }
             }
 
@@ -206,7 +206,7 @@ class MainActivity : ComponentActivity() {
                     }
                     if (items.any { it.key == "vendor_bg" && !it.ok }) Button(onClick = {
                         val opened = com.kilon.agentvscreen.host.Liveness.openBackgroundSettings(this@MainActivity)
-                        Toast.makeText(this@MainActivity, "已打开：$opened。把 Agent-VScreen 改成手动管理，允许自启动、关联启动和后台活动", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this@MainActivity, "已打开：$opened。把 ATVSX 改成手动管理，允许自启动、关联启动和后台活动", Toast.LENGTH_LONG).show()
                         tick++
                     }) { Text("去设置后台管理") }
                     OutlinedButton(onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text("无障碍设置") }
@@ -243,7 +243,7 @@ class MainActivity : ComponentActivity() {
             Block("应用限制") { VScreenAppRules() }
 
             Diagnostics(items)
-            Text("Agent-VScreen ${BuildConfig.VERSION_NAME} · 副屏能力来自 Minis VScreen", fontSize = 11.sp,
+            Text("ATVSX ${BuildConfig.VERSION_NAME} · 副屏能力来自 Minis VScreen", fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp))
         }
     }
@@ -261,7 +261,7 @@ class MainActivity : ComponentActivity() {
                     Image(painterResource(R.drawable.ic_logo), null, Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)))
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Agent-VScreen", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Text("ATVSX", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text("给任何手机 agent 用的后台副屏", color = Color(0xB3FFFFFF), fontSize = 13.sp)
                     }
                     Switch(checked = serviceOn, onCheckedChange = setOn)
@@ -471,7 +471,7 @@ class MainActivity : ComponentActivity() {
                 OutlinedButton(onClick = {
                     runCatching {
                         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-                            .putExtra(Intent.EXTRA_SUBJECT, "Agent-VScreen 诊断").putExtra(Intent.EXTRA_TEXT, diagnostics(items)), "发送诊断"))
+                            .putExtra(Intent.EXTRA_SUBJECT, "ATVSX 诊断").putExtra(Intent.EXTRA_TEXT, diagnostics(items)), "发送诊断"))
                     }
                 }) { Icon(Icons.Filled.Share, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("分享") }
             }

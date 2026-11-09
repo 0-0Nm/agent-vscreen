@@ -29,7 +29,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         const val DEFAULT_SESSION = "default"
         internal const val SHOT_DIR = "vscreen"
 
-        const val QUICK_HELP = """vscreen — Agent-VScreen：在看不见的副屏里操作应用，不占用户主屏（完整说明：help all；单条：help act）
+        const val QUICK_HELP = """vscreen — ATVSX：在看不见的副屏里操作应用，不占用户主屏（完整说明：help all；单条：help act）
   launch 应用名            打开应用，返回四段（做了什么 / 这段时间 / 现在 / 注意）
   act "步骤; 步骤; …"      做一段操作，返回四段；act 不带步骤 = 看一眼
         步骤：tap 目标 | press 目标 | swipe x1 y1 x2 y2 | drag x1 y1 x2 y2 … | scroll down | type 文字 | key back | wait 条件 | use 段名
@@ -43,8 +43,8 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
 一步没达到预期（until 没等到、字没输进去）这段就停在那一步，后面的不做，【注意】里写明现在的画面。
 输出很长时完整结果也存在截图目录的 last.txt（路径见 help all），可以用 head / sed 分段看。"""
 
-        const val HELP = """vscreen — Agent-VScreen 后台操作：在看不见的副屏里操作其他应用，不占用户主屏。截图由你（调用方的模型）看，手机只报事实。
-不需要 adb 或无线调试：特权走 Agent-VScreen 自己的 Shizuku 通道。不要去连 adb、配无线调试或改 adb 密钥。没有副屏时直接 launch，会自动建屏。
+        const val HELP = """vscreen — ATVSX 后台操作：在看不见的副屏里操作其他应用，不占用户主屏。截图由你（调用方的模型）看，手机只报事实。
+不需要 adb 或无线调试：特权走 ATVSX 自己的 Shizuku 通道。不要去连 adb、配无线调试或改 adb 密钥。没有副屏时直接 launch，会自动建屏。
 
 返回的四段（launch / act / handoff in）：
   【做了什么】 每一步做了什么、等到了什么或等到时间没等到、哪个停止条件触发了（只有事实，没有“成功/失败”的判断）
@@ -249,7 +249,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         val pkg = com.kilon.agentvscreen.core.VScreenShell.topPackage(id) ?: return
         if (VScreenStore.ruleFor(pkg) == VScreenStore.Rule.BLOCK)
             throw ActionError("APP_BLOCKED", "副屏上现在是 $pkg，用户禁止后台操作它（不能读屏也不能操作）：act \"key back\" 离开或 stop。" +
-                "这是用户在 Agent-VScreen › 应用限制 里定的，不要绕过")
+                "这是用户在 ATVSX › 应用限制 里定的，不要绕过")
     }
 
     internal fun dispatch(sub: String, args: OffloadArgs, sid: String?): NativeOffloadResult = when (sub) {

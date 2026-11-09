@@ -38,9 +38,9 @@ class HostService : Service() {
         @Volatile var server: ApiServer? = null; private set
         private const val CHANNEL = "agent_vscreen_host"
         private const val NOTE_ID = 7001
-        const val ACTION_STOP = "com.kilon.agentvscreen.STOP"
-        const val ACTION_ALLOW = "com.kilon.agentvscreen.ALLOW"
-        const val ACTION_SHOW_WINDOW = "com.kilon.agentvscreen.SHOW_WINDOW"
+        const val ACTION_STOP = "com.kilon.agentvscreen.lab.STOP"
+        const val ACTION_ALLOW = "com.kilon.agentvscreen.lab.ALLOW"
+        const val ACTION_SHOW_WINDOW = "com.kilon.agentvscreen.lab.SHOW_WINDOW"
         private const val STOP_CHANNEL = "agent_vscreen_stopped"
         private const val STOP_NOTE_ID = 7002
 
@@ -174,7 +174,7 @@ class HostService : Service() {
     private fun notification(): Notification {
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26 && nm?.getNotificationChannel(CHANNEL) == null)
-            nm?.createNotificationChannel(NotificationChannel(CHANNEL, "Agent-VScreen 服务", NotificationManager.IMPORTANCE_LOW))
+            nm?.createNotificationChannel(NotificationChannel(CHANNEL, "ATVSX 服务", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val stop = PendingIntent.getService(this, 1, Intent(this, HostService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         val err = server?.lastError ?: Liveness.problem()
@@ -184,9 +184,9 @@ class HostService : Service() {
         val b = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
             .setContentTitle(when {
-                s.userStopped -> "Agent-VScreen · AI 已停止"
-                s.windowHidden && s.displayId != null -> "Agent-VScreen · AI 在后台工作（小窗已收起）"
-                else -> "Agent-VScreen 服务运行中"
+                s.userStopped -> "ATVSX · AI 已停止"
+                s.windowHidden && s.displayId != null -> "ATVSX · AI 在后台工作（小窗已收起）"
+                else -> "ATVSX 服务运行中"
             })
             .setContentText(err ?: "$where · CLI / HTTP / MCP")
             .setContentIntent(open)

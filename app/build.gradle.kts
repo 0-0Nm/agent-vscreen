@@ -10,7 +10,7 @@ android {
     namespace = "com.kilon.agentvscreen"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.kilon.agentvscreen"
+        applicationId = "com.kilon.agentvscreen.lab"
         minSdk = 30
         targetSdk = 35
         versionCode = 8

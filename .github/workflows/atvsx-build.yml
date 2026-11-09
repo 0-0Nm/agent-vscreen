@@ -1,0 +1,57 @@
+name: ATVSX coexist debug build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: atvsx-debug-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: tsbridge/go.mod
+          cache-dependency-path: tsbridge/go.sum
+      - name: Verify source and prepare Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s app/src/main/assets/vscreen-ocr/det.onnx
+          test -s app/src/main/assets/vscreen-ocr/rec.onnx
+          sha256sum app/src/main/assets/vscreen-ocr/*.onnx
+          sdkmanager "platforms;android-36" "build-tools;35.0.0"
+          chmod +x gradlew tsbridge/build.sh
+      - name: Build Android arm64 Tailscale helper
+        run: sh tsbridge/build.sh
+      - name: Assemble coexist debug APK
+        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
+      - name: Verify APK identity and signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=.atvsx-build/app/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          mkdir -p atvsx-artifacts
+          cp "$APK" atvsx-artifacts/ATVSX-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" > atvsx-artifacts/apk-badging.txt
+          grep -q "package: name='com.kilon.agentvscreen.lab'" atvsx-artifacts/apk-badging.txt
+          grep -q "application-label:'ATVSX'" atvsx-artifacts/apk-badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK" > atvsx-artifacts/signature-verification.txt
+          git rev-parse HEAD > atvsx-artifacts/source-commit.txt
+          sha256sum atvsx-artifacts/ATVSX-debug.apk > atvsx-artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ATVSX-debug-${{ github.run_number }}
+          path: atvsx-artifacts/
+          if-no-files-found: error
+          retention-days: 14

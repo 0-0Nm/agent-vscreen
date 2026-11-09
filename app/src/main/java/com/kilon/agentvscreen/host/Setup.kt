@@ -50,7 +50,7 @@ object Setup {
         val done = Liveness.vendorSetupDone(ctx)
         return listOf(Item("vendor_bg", "系统后台管理", done,
             if (done) "已在“$page”里设置；只有亮屏使用时又被冻结，这一项才会重新亮起"
-            else "在“$page”里把 Agent-VScreen 改成手动管理，允许自启动、关联启动和后台活动"))
+            else "在“$page”里把 ATVSX 改成手动管理，允许自启动、关联启动和后台活动"))
     }
 
     /** Grant everything Shizuku can grant. Returns one line per step. */
@@ -82,12 +82,12 @@ object Setup {
         val next = (list.filter { it != comp } + comp).joinToString(":")
         val w = VScreenShell.run(arrayOf("settings", "put", "secure", "enabled_accessibility_services", next))
         VScreenShell.run(arrayOf("settings", "put", "secure", "accessibility_enabled", "1"))
-        if (w.exitCode != 0) return false to "无障碍：写系统设置失败（${w.combined.take(80)}），请在 系统设置 › 无障碍 › Agent-VScreen 手动打开"
+        if (w.exitCode != 0) return false to "无障碍：写系统设置失败（${w.combined.take(80)}），请在 系统设置 › 无障碍 › ATVSX 手动打开"
         val t0 = System.currentTimeMillis()
         while (System.currentTimeMillis() - t0 < 4_000) {
             if (VScreenAccessibilityService.getInstance() != null) return true to "无障碍已打开（其它无障碍服务保持不变）"
             Thread.sleep(200)
         }
-        return false to "无障碍：已写入设置但 4 秒内没连上，部分系统会拦截，请在 系统设置 › 无障碍 › Agent-VScreen 手动打开一次"
+        return false to "无障碍：已写入设置但 4 秒内没连上，部分系统会拦截，请在 系统设置 › 无障碍 › ATVSX 手动打开一次"
     }
 }

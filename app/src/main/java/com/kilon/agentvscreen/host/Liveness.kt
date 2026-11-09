@@ -80,7 +80,7 @@ object Liveness {
         !HostService.isAlive -> null
         !foreground -> "服务没能成为前台服务（${foregroundError ?: "原因未知"}），切到后台后系统会冻结或杀掉它。打开一次本应用会自动补上。"
         recentlyFrozen() -> "系统在后台冻结过本应用 $freezes 次（最近一次 ${lastFreezeMs / 1000} 秒）：冻结期间 agent 的命令会一直等，直到你打开本应用。" +
-            "请在系统的后台管理里把 Agent-VScreen 设为“允许后台活动”。"
+            "请在系统的后台管理里把 ATVSX 设为“允许后台活动”。"
         else -> null
     }
 

@@ -22,7 +22,7 @@ import org.json.JSONObject
  * Between turns, on the phone only (the same condition evaluator as act, no model calls), for up to 12 hours: when it
  * is seen, wake the chat or notify the user, and end. Nothing is done on the screen by itself. While one runs the idle
  * screen is neither paused nor released, a foreground notification shows what is watched (with a stop button) and a
- * partial wake lock keeps the checks going. They end when Agent-VScreen is force-stopped or restarted.
+ * partial wake lock keeps the checks going. They end when ATVSX is force-stopped or restarted.
  */
 internal object VScreenRules {
     private const val TAG = "VScreenRules"
@@ -237,7 +237,7 @@ internal object VScreenRules {
         }
 
         companion object {
-            const val ACTION_STOP = "com.kilon.agentvscreen.core.RULES_STOP"
+            const val ACTION_STOP = "com.kilon.agentvscreen.lab.core.RULES_STOP"
             private const val CHANNEL = "vscreen_rules"
             private const val NOTE_ID = 7299
             @Volatile var lastStartError: String? = null

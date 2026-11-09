@@ -137,10 +137,10 @@ internal object VScreenPower {
 
     /** What the user does by hand on this phone when Shizuku is not available. */
     fun manualSteps(): String = when (VScreenShell.device().vendor.lowercase()) {
-        "honor", "huawei" -> "手机管家 › 应用启动管理 › Agent-VScreen：关闭“自动管理”，手动打开“允许后台活动”；设置 › 电池 › 更多电池设置：打开“休眠时始终保持网络连接”"
-        "xiaomi", "redmi" -> "设置 › 应用设置 › 应用管理 › Agent-VScreen › 省电策略：无限制；并打开“自启动”"
-        "vivo", "iqoo" -> "i管家 › 应用管理 › 权限管理 › 自启动 打开 Agent-VScreen；设置 › 电池 › 后台耗电管理 › Agent-VScreen：允许后台高耗电"
-        "oppo", "oneplus", "realme" -> "设置 › 电池 › 应用耗电管理 › Agent-VScreen：允许后台运行、允许完全后台行为"
-        else -> "系统设置 › 应用 › Agent-VScreen › 电池：不受限制（或“不优化”），并允许后台数据"
+        "honor", "huawei" -> "手机管家 › 应用启动管理 › ATVSX：关闭“自动管理”，手动打开“允许后台活动”；设置 › 电池 › 更多电池设置：打开“休眠时始终保持网络连接”"
+        "xiaomi", "redmi" -> "设置 › 应用设置 › 应用管理 › ATVSX › 省电策略：无限制；并打开“自启动”"
+        "vivo", "iqoo" -> "i管家 › 应用管理 › 权限管理 › 自启动 打开 ATVSX；设置 › 电池 › 后台耗电管理 › ATVSX：允许后台高耗电"
+        "oppo", "oneplus", "realme" -> "设置 › 电池 › 应用耗电管理 › ATVSX：允许后台运行、允许完全后台行为"
+        else -> "系统设置 › 应用 › ATVSX › 电池：不受限制（或“不优化”），并允许后台数据"
     }
 }

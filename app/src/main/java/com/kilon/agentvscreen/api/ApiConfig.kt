@@ -7,7 +7,7 @@ import java.security.SecureRandom
 /** Port, access token and turn length; everything a caller needs to connect, in one place. */
 object ApiConfig {
     private const val PREFS = "agent_vscreen_api"
-    const val DEFAULT_PORT = 18765
+    const val DEFAULT_PORT = 18766
     private lateinit var prefs: SharedPreferences
 
     fun init(ctx: Context) {
@@ -39,7 +39,7 @@ object ApiConfig {
 
     /** Device name of the built-in node in the tailnet. */
     var tailnetHostname: String
-        get() = prefs.getString("tailnet_host", null)?.takeIf { it.isNotBlank() } ?: "agent-vscreen"
+        get() = prefs.getString("tailnet_host", null)?.takeIf { it.isNotBlank() } ?: "atvsx"
         set(v) { prefs.edit().putString("tailnet_host", v.trim().lowercase().replace(Regex("[^a-z0-9-]"), "-").trim('-').take(40)).apply() }
 
     /** Optional control server (Headscale); null = Tailscale's own. */
@@ -61,7 +61,7 @@ object ApiConfig {
     /** MCP client config (streamable HTTP). */
     fun mcpJson(): String = """{
   "mcpServers": {
-    "agent-vscreen": {
+    "atvsx": {
       "type": "http",
       "url": "$baseUrl/mcp",
       "headers": { "Authorization": "Bearer $token" }

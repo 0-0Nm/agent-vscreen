@@ -135,7 +135,7 @@ internal object VScreenHandoff {
      * permission (13+), the app-op some systems set to ignore, or our alert channel switched off.
      */
     fun notifyBlocked(context: Context): String? = runCatching {
-        if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) return@runCatching "系统设置里关了 Agent-VScreen 的通知"
+        if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) return@runCatching "系统设置里关了 ATVSX 的通知"
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
             return@runCatching "没有授予通知权限（POST_NOTIFICATIONS）"
         val ops = context.getSystemService(android.app.AppOpsManager::class.java)

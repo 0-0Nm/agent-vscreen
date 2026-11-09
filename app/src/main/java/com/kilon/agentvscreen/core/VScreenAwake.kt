@@ -34,7 +34,7 @@ object VScreenAwake {
     private const val TAG = "VScreenAwake"
     private const val CHECK_MS = 15_000L
     private const val ALARM_MS = 60_000L
-    private const val ACTION_TICK = "com.kilon.agentvscreen.core.AWAKE_TICK"
+    private const val ACTION_TICK = "com.kilon.agentvscreen.lab.core.AWAKE_TICK"
     private const val OWN_DISPLAY_GROUP = 1 shl 11
     private const val ALWAYS_UNLOCKED = 1 shl 12
 

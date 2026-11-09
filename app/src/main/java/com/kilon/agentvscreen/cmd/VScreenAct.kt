@@ -411,7 +411,7 @@ private fun appRule(d: VScreenDisplay, step: Step) {
     if (VScreenStore.rules.value.isEmpty()) return
     val pkg = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull() ?: return
     val rule = VScreenStore.ruleFor(pkg) ?: return
-    val hint = "这是用户在 Agent-VScreen › 应用限制 里定的，不要绕过（也不要从别的入口进同一个应用）"
+    val hint = "这是用户在 ATVSX › 应用限制 里定的，不要绕过（也不要从别的入口进同一个应用）"
     val back = step.kind == "key" && step.text == "back"
     if (rule == VScreenStore.Rule.BLOCK && !back) throw StepRefused("APP_BLOCKED", "副屏上是 $pkg，用户禁止后台操作它：只能 key back 离开或 stop。$hint")
     if (rule == VScreenStore.Rule.READONLY && step.kind !in setOf("scroll", "key")) throw StepRefused("APP_READ_ONLY", "副屏上是 $pkg，用户设为只读：能看、滚动、返回，不能点击/输入/滑动。$hint")
@@ -624,7 +624,7 @@ private fun VScreenOffloadHandler.startKeep(sid: String, d0: VScreenDisplay, spe
     }
     val spec2 = VScreenRules.Spec(name, sid, spec, app, 1_000L, forMs, wake = how == "wake", notify = how == "notify")
     val l = try { VScreenRules.start(spec2, host) } catch (e: IllegalStateException) { return "KEEP_LIMIT：${e.message}" }
-    val warn = if (how == "notify") VScreenHandoff.notifyBlocked(context)?.let { "；但通知发不出去（$it）：请用户打开 Agent-VScreen 的通知，或改用 --keep wake" } else null
+    val warn = if (how == "notify") VScreenHandoff.notifyBlocked(context)?.let { "；但通知发不出去（$it）：请用户打开 ATVSX 的通知，或改用 --keep wake" } else null
     return "本轮之后继续盯「${l.spec.name}」：$spec，最长 ${forMs / 60_000} 分钟，看到就${if (how == "wake") "发一条事件（vscreen events --wait 取）" else "通知用户"}，然后结束" +
         (warn ?: "") + "。副屏会保持在这一页；keep 查看，keep off ${l.spec.name} 取消。告诉用户你在盯什么、多久"
 }
@@ -636,7 +636,7 @@ internal fun VScreenOffloadHandler.launchCmd(sid: String?, args: OffloadArgs): N
     val s = sid ?: throw ActionError("NO_SESSION", "没有会话（请求头 X-VScreen-Session）")
     val q = args.positional.joinToString(" ").trim().ifEmpty { throw ActionError("INVALID_ARGS", "launch <应用名或包名>") }
     val pkg = VScreenKnowledge.resolveApp(q) ?: throw ActionError("NO_APP", "没找到“$q”：apps $q 看看已安装的应用和包名")
-    if (VScreenStore.ruleFor(pkg) == VScreenStore.Rule.BLOCK) throw ActionError("APP_BLOCKED", "用户禁止后台操作 $pkg（Agent-VScreen › 应用限制），不要绕过")
+    if (VScreenStore.ruleFor(pkg) == VScreenStore.Rule.BLOCK) throw ActionError("APP_BLOCKED", "用户禁止后台操作 $pkg（ATVSX › 应用限制），不要绕过")
     val start = System.currentTimeMillis()
     val t0 = SystemClock.elapsedRealtime()
     val main0 = mainTop(); val tasks0 = mainTaskIds()

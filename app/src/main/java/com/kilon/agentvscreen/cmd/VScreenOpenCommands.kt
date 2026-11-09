@@ -159,9 +159,9 @@ private fun VScreenOffloadHandler.handoffIn(sid: String, pkgArg: String?): Nativ
     val pick = if (pkgArg != null) main.firstOrNull { it.pkg == pkgArg }
         ?: throw ActionError("HANDOFF_NO_TASK", "主屏上没有 $pkgArg 的任务。可以 launch $pkgArg 在副屏另开一份（不带用户的页面）")
     else main.firstOrNull { it.pkg !in handoffSkip() }
-        ?: throw ActionError("HANDOFF_NO_TASK", "主屏最近没有可接手的应用（只有桌面和 Agent-VScreen 自己）：请用户先打开那个应用，或说是哪个应用")
+        ?: throw ActionError("HANDOFF_NO_TASK", "主屏最近没有可接手的应用（只有桌面和 ATVSX 自己）：请用户先打开那个应用，或说是哪个应用")
     if (VScreenStore.ruleFor(pick.pkg) == VScreenStore.Rule.BLOCK)
-        throw ActionError("APP_BLOCKED", "用户禁止后台操作 ${pick.pkg}（Agent-VScreen › 应用限制），不能接手它")
+        throw ActionError("APP_BLOCKED", "用户禁止后台操作 ${pick.pkg}（ATVSX › 应用限制），不能接手它")
     val want = VScreenShell.appOrientation(context, pick.pkg, null) ?: VScreenMap.profile(pick.pkg)["orientation"]?.let { it == "landscape" }
     var d0 = BackgroundOperation.acquire(sid, create = true, landscape = want)
     if (want != null && BackgroundOperation.nativeLandscape(d0) != want) d0 = BackgroundOperation.rebuild(sid, want)
@@ -223,7 +223,7 @@ internal fun VScreenOffloadHandler.stopCmd(sid: String?, args: OffloadArgs): Nat
     val force = args.hasFlag("force")
     val main0 = mainTop(); val tasks0 = mainTaskIds()
     val pkgArg = args.positional.getOrNull(0)
-    if (pkgArg != null && force && VScreenShell.isProtected(pkgArg)) throw ActionError("PROTECTED_APP", "$pkgArg 是 Agent-VScreen 自己、桌面或系统界面，不能 force-stop")
+    if (pkgArg != null && force && VScreenShell.isProtected(pkgArg)) throw ActionError("PROTECTED_APP", "$pkgArg 是 ATVSX 自己、桌面或系统界面，不能 force-stop")
     val stopped = VScreenKnowledge.journey(s)
     VScreenKnowledge.endJourney(s)
     VScreenKnowledge.touch(s, stopped)

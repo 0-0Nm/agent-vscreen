@@ -29,7 +29,7 @@
 
     <application
         android:name=".host.VScreenApp"
-        android:label="Agent-VScreen"
+        android:label="ATVSX"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false"
@@ -50,7 +50,7 @@
             android:name=".ui.FullscreenActivity"
             android:exported="false"
             android:excludeFromRecents="true"
-            android:taskAffinity="com.kilon.agentvscreen.fullscreen"
+            android:taskAffinity="${applicationId}.fullscreen"
             android:theme="@android:style/Theme.Material.NoActionBar.TranslucentDecor"
             android:windowSoftInputMode="adjustResize" />
 
@@ -73,7 +73,7 @@
         <service
             android:name=".host.VScreenAccessibilityService"
             android:exported="true"
-            android:label="Agent-VScreen（只读）"
+            android:label="ATVSX（只读）"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
