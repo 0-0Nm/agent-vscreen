@@ -128,17 +128,9 @@ object VScreenAwake {
     }
 
 
-    /** Best-effort hidden PowerManager.userActivity on a display-scoped context; never falls back globally. */
-    private fun targetedUserActivity(d: VScreenDisplay): Boolean = runCatching {
-        val dm = appContext?.getSystemService(DisplayManager::class.java) ?: return false
-        val display = dm.getDisplay(d.displayId) ?: return false
-        val ctx = appContext?.createDisplayContext(display) ?: return false
-        val pm = ctx.getSystemService(PowerManager::class.java) ?: return false
-        val m = pm.javaClass.getDeclaredMethod("userActivity", Long::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-        m.isAccessible = true
-        m.invoke(pm, SystemClock.uptimeMillis(), 0, 0)
-        true
-    }.onFailure { AppLogger.warning(TAG, "targeted userActivity unavailable on display ${d.displayId}: ${it.message}") }.getOrDefault(false)
+    /** Invoke only the shell UserService per-display IPowerManager overload; never the default-display API. */
+    private fun targetedUserActivity(d: VScreenDisplay): Boolean =
+        VScreenRemoteDisplay.userActivity(d.displayId).getOrDefault(false)
 
     /** Work is pending on the background screen: a chat turn owns it, or a watch runs. */
     private fun needed(): Boolean = BackgroundOperation.needsAwake()

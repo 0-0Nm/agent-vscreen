@@ -152,6 +152,11 @@ class VScreenDisplayService : Binder {
                     synchronized(displays) { if (displays.containsKey(id)) touched[id] = SystemClock.elapsedRealtime() }
                     out.writeInt(0)
                 }
+                USER_ACTIVITY -> {
+                    val id = data.readInt()
+                    val ok = userActivity(id)
+                    out.writeInt(0); out.writeInt(if (ok) 1 else 0)
+                }
                 PARK -> {
                     // v21 idle power saving: no surface = display off, the apps on it stop (pages kept).
                     val id = data.readInt()
@@ -616,6 +621,24 @@ class VScreenDisplayService : Binder {
             else super.getAttributionSource()
     }
 
+
+    /** Call the per-display IPowerManager overload from the shell UserService. */
+    private fun userActivity(displayId: Int): Boolean = runCatching {
+        if (displayId <= 0 || displayManager().getDisplay(displayId) == null) return false
+        val pm = getSystemService(POWER_SERVICE) as? android.os.PowerManager ?: return false
+        val field = pm.javaClass.getDeclaredField("mService").apply { isAccessible = true }
+        val service = field.get(pm) ?: return false
+        val method = service.javaClass.methods.firstOrNull { m ->
+            m.name == "userActivity" && m.parameterTypes.contentEquals(arrayOf(
+                Int::class.javaPrimitiveType!!, Long::class.javaPrimitiveType!!,
+                Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
+            ))
+        } ?: return false
+        method.invoke(service, displayId, android.os.SystemClock.uptimeMillis(), 2, 0)
+        synchronized(displays) { if (displays.containsKey(displayId)) touched[displayId] = android.os.SystemClock.elapsedRealtime() }
+        true
+    }.getOrDefault(false)
+
     companion object {
         const val DESCRIPTOR = "com.kilon.agentvscreen.core.VScreenDisplayService"
         const val CREATE = FIRST_CALL_TRANSACTION
@@ -627,6 +650,7 @@ class VScreenDisplayService : Binder {
         const val LIST = FIRST_CALL_TRANSACTION + 6
         const val SET_SURFACE = FIRST_CALL_TRANSACTION + 7
         const val TOUCH = FIRST_CALL_TRANSACTION + 8
+        const val USER_ACTIVITY = FIRST_CALL_TRANSACTION + 9
         const val ROTATION = FIRST_CALL_TRANSACTION + 9
         const val POINTER = FIRST_CALL_TRANSACTION + 10
         const val APS = FIRST_CALL_TRANSACTION + 11
@@ -691,3 +715,4 @@ class VScreenDisplayService : Binder {
         ).filter { flags and it.first != 0 }.map { it.second }
     }
 }
+
