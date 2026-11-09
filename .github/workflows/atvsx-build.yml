@@ -33,6 +33,18 @@ jobs:
           sha256sum app/src/main/assets/vscreen-ocr/*.onnx
           sdkmanager "platforms;android-36" "build-tools;35.0.0"
           chmod +x gradlew tsbridge/build.sh
+      - name: Run targeted display-health unit tests
+        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest'
+      - name: Preserve targeted test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATVSX-targeted-test-results-${{ github.run_number }}
+          path: |
+            app/build/test-results/testDebugUnitTest/**
+            app/build/reports/tests/testDebugUnitTest/**
+          if-no-files-found: warn
+          retention-days: 14
       - name: Build Android arm64 Tailscale helper
         run: sh tsbridge/build.sh
       - name: Assemble coexist debug APK

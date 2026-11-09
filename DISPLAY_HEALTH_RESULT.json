@@ -1,0 +1,30 @@
+{
+  "task": "a6fd7d4a-bcf4-45d9-8867-fb3f803720f4",
+  "scope": "display-health follow-up",
+  "status": "implementation-ready-for-cloud-validation",
+  "changes": [
+    "action gate now follows generation, re-read, user-stop and takeover checks",
+    "wake gate records action start only after the gate; race-free atomicity is not claimed",
+    "frame samples carry one published bitmap/version/convertedAt/receivedAt snapshot",
+    "fresh means converted and published after the request, not producer timestamp",
+    "missing frame is distinct from cached frame",
+    "targeted test artifacts are uploaded with if: always()"
+  ],
+  "local_validation": {
+    "git_diff_check": "passed",
+    "targeted_unit_test": "not_completed_locally: Gradle 8.11.1 distribution download timed out; cached Gradle 9.4.1 invocation remained running past tool budget",
+    "static_checks_are_not_tests": true
+  },
+  "runtime": {
+    "device_install": false,
+    "device_validation": false,
+    "apk_published": false
+  },
+  "remote": {
+    "base_commit": "8220279df3e73d5e75989496b9489ebe3d109d66",
+    "branch": "fix/display-health",
+    "commit": null,
+    "workflow_run": null,
+    "artifact": null
+  }
+}

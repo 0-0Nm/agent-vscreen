@@ -31,6 +31,8 @@ import org.json.JSONObject
  *    on the user's main screen, so it is not done; status says the background screen sleeps with the phone.
  */
 object VScreenAwake {
+    class ActionBlocked(message: String) : Exception(message)
+
     private const val TAG = "VScreenAwake"
     private const val CHECK_MS = 15_000L
     private const val ALARM_MS = 60_000L
@@ -92,6 +94,23 @@ object VScreenAwake {
         AppLogger.info(TAG, "display ${d.displayId}: $lastWake")
         if (on) { d.requestFreshFrame(); d.awaitFrameAfter(SystemClock.elapsedRealtime(), 400) }
         return if (on) "副屏刚才休眠了（${stateName(st)}${if (screenOff) "，手机熄屏中" else ""}），已唤醒" else "副屏休眠（${stateName(st)}），唤醒没成功：画面可能不动"
+    }
+
+    /**
+     * Action-only gate: a cached frame may still be returned for diagnostics, but input must never
+     * be injected while the target display is known to be asleep or its state cannot be verified.
+     */
+    fun ensureForAction(d: VScreenDisplay): String? {
+        if (d.released) throw ActionBlocked("副屏已释放，动作没有执行")
+        if (d.parked) throw ActionBlocked("副屏处于省电暂停，动作没有执行：先恢复并重新 read")
+        val before = stateOf(d) ?: throw ActionBlocked("读不到副屏电源状态，动作没有执行：先 read 确认副屏")
+        if (VScreenDisplayHealth.actionMayInject(stateKnown = true, displayOn = before == Display.STATE_ON)) return null
+        val note = ensure(d)
+        val after = stateOf(d)
+        if (!VScreenDisplayHealth.actionMayInject(stateKnown = after != null, displayOn = after == Display.STATE_ON)) {
+            throw ActionBlocked("副屏仍未唤醒（${stateName(after ?: before)}），未执行请求的触摸、输入或业务按键动作；门禁内部可能已发送唤醒键")
+        }
+        return note
     }
 
     private fun stateName(s: Int) = when (s) {

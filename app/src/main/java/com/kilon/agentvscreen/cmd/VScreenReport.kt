@@ -14,6 +14,7 @@ import com.kilon.agentvscreen.core.VScreenDisplay
 import com.kilon.agentvscreen.core.VScreenOcr
 import com.kilon.agentvscreen.core.VScreenPerception
 import com.kilon.agentvscreen.core.VScreenRecorder
+import com.kilon.agentvscreen.core.VScreenDisplayHealth
 import com.kilon.agentvscreen.core.VScreenShell
 import java.io.File
 import java.io.FileOutputStream
@@ -153,7 +154,7 @@ internal fun mergeElements(d: VScreenDisplay, a11y: List<RawEl>, ocr: List<VScre
 
 /** One look at the screen: a frame, the OCR words of exactly that frame, the elements, the foreground activity. */
 internal class Snap(val frame: Bitmap?, val version: Long, val items: List<VScreenOcr.Item>?, val els: List<El>,
-                    val activity: String?, val ocrReused: Boolean)
+                    val activity: String?, val ocrReused: Boolean, val frameFresh: Boolean, val frameAgeMs: Long)
 
 private val snapPool = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "vscreen-snap").apply { isDaemon = true } }
 
@@ -172,25 +173,24 @@ internal fun VScreenOffloadHandler.snapshot(d: VScreenDisplay, freshMs: Long = 1
     while (true) {
         val t0 = SystemClock.elapsedRealtime()
         d.requestFreshFrame()
-        d.awaitFrameAfter(t0, freshMs)
-        val fv = d.latestWithVersion()
+        val sample = d.awaitFrameAfterInfo(t0, freshMs)
         val a11yF = snapPool.submit<List<RawEl>> { runCatching { a11yRaw(d) }.getOrDefault(emptyList()) }
         val actF = snapPool.submit<String?> { runCatching { VScreenShell.topActivity(d.displayId) }.getOrNull() }
         var reused = false
-        val items: List<VScreenOcr.Item>? = if (fv == null) null else {
-            VScreenPerception.readingFor(d.displayId, fv.first, fv.second)?.let { reused = true; it.items }
-                ?: runCatching { VScreenOcr.recognize(d.displayId, fv.first, fv.second, accurate = VScreenOcr.accurateEnabled()) }
+        val items: List<VScreenOcr.Item>? = if (sample == null) null else {
+            VScreenPerception.readingFor(d.displayId, sample.bitmap, sample.version)?.let { reused = true; it.items }
+                ?: runCatching { VScreenOcr.recognize(d.displayId, sample.bitmap, sample.version, accurate = VScreenOcr.accurateEnabled()) }
                     .getOrNull()?.takeIf { it.error == null }?.let { r ->
                         val a11yTexts = runCatching { a11yF.get(3, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(emptyList()).map { it.label }
-                        VScreenPerception.offerReading(d.displayId, fv.first, fv.second, r, a11yTexts)
+                        VScreenPerception.offerReading(d.displayId, sample.bitmap, sample.version, r, a11yTexts)
                         r.items
                     }
         }
         val raw = runCatching { a11yF.get(3, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(emptyList())
         val act = runCatching { actF.get(3, java.util.concurrent.TimeUnit.SECONDS) }.getOrNull()
         val after = d.latestWithVersion()
-        if (attempt == 0 && fv != null && after != null && after.second != fv.second && !samePicture(fv.first, after.first)) { attempt++; continue }
-        return Snap(fv?.first, fv?.second ?: -1L, items, mergeElements(d, raw, items), act, reused)
+        if (attempt == 0 && sample != null && after != null && after.second != sample.version && !samePicture(sample.bitmap, after.first)) { attempt++; continue }
+        return Snap(sample?.bitmap, sample?.version ?: -1L, items, mergeElements(d, raw, items), act, reused, sample?.fresh == true, sample?.ageMs ?: -1L)
     }
 }
 
@@ -420,6 +420,7 @@ internal fun VScreenOffloadHandler.fourBlocks(sid: String, d: VScreenDisplay, do
     val picF = REPORT_POOL.submit<Pair<List<String>, Boolean>> { runCatching { pictureFacts(d, from, now) }.getOrElse { listOf("（读不到录屏：${it.message}）") to false } }
     val cellsF = REPORT_POOL.submit<List<Pair<Long, Bitmap>>> { runCatching { pickTrack(d.displayId, from, now, Report.MAX_CELLS) }.getOrDefault(emptyList()) }
     val snap = snapshot(d)
+    VScreenDisplayHealth.cachedFrameNote(snap.frame != null, snap.frameFresh, snap.frameAgeMs)?.let { attention += "$it；先 read/重试确认" }
     val (picLines, changed) = runCatching { picF.get(5, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(emptyList<String>() to false)
     val cells = runCatching { cellsF.get(5, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(emptyList())
     val words = wordFacts(d, from, System.currentTimeMillis())

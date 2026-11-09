@@ -192,6 +192,9 @@ class VScreenDisplay private constructor(
             }
         }
     @Volatile private var lastConvertMs = 0L
+    /** Metadata published together with the converted bitmap under [frameLock]. */
+    @Volatile private var latestReceivedAtMs = 0L
+    @Volatile private var latestConvertedAtMs = 0L
     @Volatile var released = false
         private set
 
@@ -250,7 +253,7 @@ class VScreenDisplay private constructor(
     private fun convert(img: android.media.Image) {
         try {
             if (released) return
-            lastConvertMs = SystemClock.elapsedRealtime()
+            val convertedAt = SystemClock.elapsedRealtime()
             val plane = img.planes[0]
             val pixelStride = plane.pixelStride
             val rowStride = plane.rowStride
@@ -271,6 +274,9 @@ class VScreenDisplay private constructor(
             synchronized(frameLock) {
                 latestRaw = exact
                 latestTurn = turn
+                latestReceivedAtMs = lastFrameAtMs
+                latestConvertedAtMs = convertedAt
+                lastConvertMs = convertedAt
                 _frameVersion.value = _frameVersion.value + 1
             }
         } catch (t: Throwable) {
@@ -354,22 +360,47 @@ class VScreenDisplay private constructor(
         }
     }
 
+    data class FrameSample(
+        val bitmap: Bitmap,
+        val version: Long,
+        val fresh: Boolean,
+        val ageMs: Long,
+        /** elapsed-realtime when this exact bitmap was published */
+        val convertedAtMs: Long,
+        /** elapsed-realtime when the producer delivered the source image */
+        val receivedAtMs: Long,
+    )
+
+    /** A consistent bitmap/version/timestamp snapshot. */
+    private fun publishedSample(now: Long, freshSinceMs: Long? = null): FrameSample? = synchronized(frameLock) {
+        val b = latestRaw ?: return@synchronized null
+        val converted = latestConvertedAtMs
+        FrameSample(
+            b, _frameVersion.value,
+            freshSinceMs?.let { converted >= it } ?: false,
+            (now - converted).coerceAtLeast(0L), converted, latestReceivedAtMs,
+        )
+    }
+
     /**
-     * A frame at least as new as [notOlderThanMs] (elapsed realtime), waiting
-     * up to [timeoutMs] for one. Used by screenshots taken right after an
-     * action, so the agent sees the result of what it just did.
+     * Request a frame and retain whether the result was actually fresh. A timeout may return the
+     * last cached bitmap for read-only diagnostics, but callers must not present it as a new frame.
      */
-    fun awaitFrameAfter(notOlderThanMs: Long, timeoutMs: Long): Bitmap? {
+    fun awaitFrameAfterInfo(notOlderThanMs: Long, timeoutMs: Long): FrameSample? {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
-        // Force the next frame to be converted regardless of the throttle.
-        lastConvertMs = 0L
+        requestFreshFrame()
         while (SystemClock.elapsedRealtime() < deadline) {
-            if (lastConvertMs >= notOlderThanMs && latest != null) return latest
+            val now = SystemClock.elapsedRealtime()
+            val sample = publishedSample(now, notOlderThanMs)
+            if (sample?.fresh == true) return sample
             Thread.sleep(30)
         }
-        // A static screen produces no new frames; the last one is still correct.
-        return latest
+        return publishedSample(SystemClock.elapsedRealtime(), notOlderThanMs)
     }
+
+    /** Compatibility bitmap-only view. Prefer [awaitFrameAfterInfo] when freshness matters. */
+    fun awaitFrameAfter(notOlderThanMs: Long, timeoutMs: Long): Bitmap? =
+        awaitFrameAfterInfo(notOlderThanMs, timeoutMs)?.bitmap
 
     fun release() {
         if (released) return

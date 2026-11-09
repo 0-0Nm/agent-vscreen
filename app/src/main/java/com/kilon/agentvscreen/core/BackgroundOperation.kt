@@ -910,17 +910,35 @@ object BackgroundOperation {
         waitWhileTakenOver(sid)
         val d = acquire(sid, create = false)
         val startedMs = System.currentTimeMillis()
-        if (!isRead) actionStarted[d.displayId] = startedMs
-        if (d.shellOwned) runCatching { VScreenRemoteDisplay.touch(d.displayId) }
-        if (expectedGeneration != null && expectedGeneration != d.generation) {
-            throw ActionError("STALE_SCREEN", "这个操作是针对旧副屏（第 $expectedGeneration 代）规划的，当前是第 ${d.generation} 代。")
-        }
         val task = synchronized(lock) { tasks.getOrPut(sid) { TaskInfo(sid) } }
-        if (!isRead && !freshPage && task.rereadRequired) {
-            val why = task.rereadReason
-            if (why != null) throw ActionError("HOST_RESTARTED", "$why。动作没有执行：看清现在的画面再继续，不要假设上一轮的步骤已经完成")
-            throw ActionError("REREAD_REQUIRED", "用户刚接管过副屏，页面可能已变化。动作没有执行：看清现在的画面再继续")
+        // All user/generation/re-read checks are evaluated before the display-state gate. This is
+        // an intentional ordering, not an atomic race-free guarantee: state may still change later.
+        when (VScreenDisplayHealth.preActionBlock(
+            userStopped = _state.value.userStopped,
+            takeover = _state.value.takeoverSessionId == sid,
+            generationMatches = expectedGeneration == null || expectedGeneration == d.generation,
+            rereadRequired = task.rereadRequired,
+            freshPage = freshPage,
+        )) {
+            VScreenDisplayHealth.PreActionBlock.USER_STOPPED -> throw ActionError("USER_STOPPED", userStoppedMessage())
+            VScreenDisplayHealth.PreActionBlock.TAKEOVER -> throw ActionError("USER_TAKEOVER", "用户正在接管副屏，动作没有执行")
+            VScreenDisplayHealth.PreActionBlock.STALE_GENERATION -> throw ActionError("STALE_SCREEN", "这个操作是针对旧副屏（第 $expectedGeneration 代）规划的，当前是第 ${d.generation} 代。动作没有执行")
+            VScreenDisplayHealth.PreActionBlock.REREAD -> {
+                val why = task.rereadReason
+                if (why != null) throw ActionError("HOST_RESTARTED", "$why。动作没有执行：看清现在的画面再继续，不要假设上一轮的步骤已经完成")
+                throw ActionError("REREAD_REQUIRED", "用户刚接管过副屏，页面可能已变化。动作没有执行：看清现在的画面再继续")
+            }
+            VScreenDisplayHealth.PreActionBlock.NONE -> Unit
         }
+        if (!isRead) {
+            try {
+                VScreenAwake.ensureForAction(d)?.let { _state.update { st -> st.copy(note = it) } }
+            } catch (e: VScreenAwake.ActionBlocked) {
+                throw ActionError("DISPLAY_NOT_AWAKE", e.message ?: "副屏未唤醒，未执行请求的触摸、输入或按键动作；门禁内部可能已发送唤醒键")
+            }
+            actionStarted[d.displayId] = startedMs
+        }
+        if (d.shellOwned) runCatching { VScreenRemoteDisplay.touch(d.displayId) }
         runCatching { ensureUpright(d) }.onFailure { AppLogger.warning(TAG, "orientation check failed: ${it.message}") }
         // v27 IME guard: the system focus (and with it the keyboard) belongs to the user's screen.
         val focus0 = if (!isRead && !describe.startsWith("接力")) focusedNow() else null
