@@ -99,7 +99,7 @@ class VScreenDisplayService : Binder {
             System.exit(0)
             return true
         }
-        if (code !in CREATE..FOCUS_TASK) return super.onTransact(code, data, reply, flags)
+        if (!isRoutedTransaction(code)) return super.onTransact(code, data, reply, flags)
         data.enforceInterface(DESCRIPTOR)
         val out = reply ?: return true
         try {
@@ -721,6 +721,21 @@ class VScreenDisplayService : Binder {
         /** Shizuku's reserved "destroy user service" transaction. */
         const val DESTROY_CODE = 16777115
         private const val SHELL_PKG = "com.android.shell"
+
+        /**
+         * The raw protocol is intentionally sparse: USER_ACTIVITY and
+         * WAKE_UP_WITH_DISPLAY live after FOCUS_TASK. Keep this list in sync
+         * with the when branches above so the binder gate cannot make a legal
+         * transaction unreachable. DESTROY_CODE is handled separately because
+         * it is Shizuku's lifecycle transaction, not a protocol transaction.
+         */
+        @JvmStatic
+        fun isRoutedTransaction(code: Int): Boolean = when (code) {
+            CREATE, RELEASE, PING, INJECT_KEY, INJECT_DRAG, REMOVE_TASK,
+            LIST, SET_SURFACE, TOUCH, ROTATION, POINTER, APS, PARK, MOVE_TASK,
+            LIST_TASKS, FOCUSED, FOCUS_TASK, USER_ACTIVITY, WAKE_UP_WITH_DISPLAY -> true
+            else -> false
+        }
 
         // DisplayManager.VIRTUAL_DISPLAY_FLAG_* (some are @hide).
         private const val PUBLIC = 1 shl 0

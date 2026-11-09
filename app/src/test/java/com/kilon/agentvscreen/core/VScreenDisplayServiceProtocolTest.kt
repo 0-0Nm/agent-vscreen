@@ -3,6 +3,8 @@ package com.kilon.agentvscreen.core
 import android.os.Binder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VScreenDisplayServiceProtocolTest {
@@ -20,5 +22,22 @@ class VScreenDisplayServiceProtocolTest {
         assertEquals(Binder.FIRST_CALL_TRANSACTION + 18, VScreenDisplayService.WAKE_UP_WITH_DISPLAY)
         assertNotEquals(VScreenDisplayService.ROTATION, VScreenDisplayService.USER_ACTIVITY)
         assertEquals(10, VScreenDisplayService.PROTOCOL)
+    }
+
+    @Test fun sparsePowerTransactionsUseTheSameRouteGateAsOnTransact() {
+        // Regression proof: the old contiguous range rejected both legal calls.
+        assertFalse(VScreenDisplayService.USER_ACTIVITY in VScreenDisplayService.CREATE..VScreenDisplayService.FOCUS_TASK)
+        assertFalse(VScreenDisplayService.WAKE_UP_WITH_DISPLAY in VScreenDisplayService.CREATE..VScreenDisplayService.FOCUS_TASK)
+
+        assertTrue(VScreenDisplayService.isRoutedTransaction(VScreenDisplayService.USER_ACTIVITY))
+        assertTrue(VScreenDisplayService.isRoutedTransaction(VScreenDisplayService.WAKE_UP_WITH_DISPLAY))
+        assertTrue(VScreenDisplayService.isRoutedTransaction(VScreenDisplayService.ROTATION))
+        assertTrue(VScreenDisplayService.isRoutedTransaction(VScreenDisplayService.FOCUS_TASK))
+    }
+
+    @Test fun routeGateRejectsUnknownAndKeepsLifecycleTransactionSeparate() {
+        assertFalse(VScreenDisplayService.isRoutedTransaction(VScreenDisplayService.FOCUS_TASK + 1))
+        assertFalse(VScreenDisplayService.isRoutedTransaction(VScreenDisplayService.DESTROY_CODE))
+        assertFalse(VScreenDisplayService.isRoutedTransaction(Binder.FIRST_CALL_TRANSACTION - 1))
     }
 }
