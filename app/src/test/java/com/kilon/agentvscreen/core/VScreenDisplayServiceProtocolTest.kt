@@ -17,6 +17,7 @@ class VScreenDisplayServiceProtocolTest {
             VScreenDisplayService.FOCUSED, VScreenDisplayService.FOCUS_TASK, VScreenDisplayService.USER_ACTIVITY,
             VScreenDisplayService.WAKE_UP_WITH_DISPLAY)
         assertEquals(txns.size, txns.toSet().size)
+        txns.forEach { assertTrue("Legal transaction must pass the production gate: $it", VScreenDisplayService.isRoutedTransaction(it)) }
         assertEquals(Binder.FIRST_CALL_TRANSACTION + 9, VScreenDisplayService.ROTATION)
         assertEquals(Binder.FIRST_CALL_TRANSACTION + 17, VScreenDisplayService.USER_ACTIVITY)
         assertEquals(Binder.FIRST_CALL_TRANSACTION + 18, VScreenDisplayService.WAKE_UP_WITH_DISPLAY)
@@ -36,8 +37,16 @@ class VScreenDisplayServiceProtocolTest {
     }
 
     @Test fun routeGateRejectsUnknownAndKeepsLifecycleTransactionSeparate() {
-        assertFalse(VScreenDisplayService.isRoutedTransaction(VScreenDisplayService.FOCUS_TASK + 1))
+        assertFalse(VScreenDisplayService.isRoutedTransaction(VScreenDisplayService.WAKE_UP_WITH_DISPLAY + 1))
         assertFalse(VScreenDisplayService.isRoutedTransaction(VScreenDisplayService.DESTROY_CODE))
         assertFalse(VScreenDisplayService.isRoutedTransaction(Binder.FIRST_CALL_TRANSACTION - 1))
     }
+    @Test fun powerPolicyRejectsUnsafeTargetsWithoutAuthorizingFallback() {
+        assertFalse(VScreenPowerPolicy.evaluate(32, 2, 1 shl 11, 2).allowed)
+        assertFalse(VScreenPowerPolicy.evaluate(33, 0, 1 shl 11, 0).allowed)
+        assertFalse(VScreenPowerPolicy.evaluate(33, 2, 1 shl 11, 3).allowed)
+        assertFalse(VScreenPowerPolicy.evaluate(33, 2, 0, 2).allowed)
+        assertTrue(VScreenPowerPolicy.evaluate(33, 2, 1 shl 11, 2).allowed)
+    }
+
 }

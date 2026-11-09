@@ -48,6 +48,8 @@ object VScreenAwake {
     @Volatile private var appContext: Context? = null
     @Volatile private var keeper: Thread? = null
     @Volatile private var lastActivityAt = 0L
+    @Volatile private var lastPowerLogAt = 0L
+    @Volatile private var lastPowerLogKey: String? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
     fun init(ctx: Context) {
@@ -97,18 +99,27 @@ object VScreenAwake {
         if (st == Display.STATE_ON) {
             val now = SystemClock.elapsedRealtime()
             if (now - lastActivityAt >= ACTIVITY_THROTTLE_MS) {
-                val active = targetedUserActivity(d)
+                val result = targetedUserActivity(d)
                 lastActivityAt = now
-                if (!active) AppLogger.warning(TAG, "display ${d.displayId}: userActivity refused while ON")
+                if (result.isFailure) {
+                    recordPowerFailure("USER_ACTIVITY", d.displayId, result.exceptionOrNull())
+                } else if (!result.getOrDefault(false)) {
+                    recordPowerFailure("USER_ACTIVITY_FALSE", d.displayId, null)
+                }
             }
             return null
         }
-        val attempt = targetedWake(d)
+        val wakeResult = targetedWake(d)
+        val attempt = wakeResult.getOrDefault(false)
+        if (wakeResult.isFailure) recordPowerFailure("WAKE_UP_WITH_DISPLAY", d.displayId, wakeResult.exceptionOrNull())
+        else if (!attempt) recordPowerFailure("WAKE_UP_WITH_DISPLAY_FALSE", d.displayId, null)
         val t0 = SystemClock.elapsedRealtime()
         while (attempt && SystemClock.elapsedRealtime() - t0 < 2_000L && stateOf(d) != Display.STATE_ON) Thread.sleep(100)
         val on = stateOf(d) == Display.STATE_ON
         wakes++
-        lastWake = "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} ${if (on) "定向唤醒后已亮" else "定向唤醒后仍未亮"}（原状态 ${stateName(st)}${if (screenOff) "，主屏熄屏中" else ""}，attempt=$attempt）"
+        val reason = if (wakeResult.isFailure) shortFailureReason(wakeResult.exceptionOrNull())
+            else if (!attempt) "REMOTE_FALSE" else if (on) "DISPLAY_ON" else "ACCEPTED_BUT_STILL_OFF"
+        lastWake = "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} ${if (on) "定向唤醒后已亮" else "定向唤醒后仍未亮"}（原状态 ${stateName(st)}${if (screenOff) "，主屏熄屏中" else ""}，attempt=$attempt，reason=$reason）"
         AppLogger.info(TAG, "display ${d.displayId}: $lastWake")
         if (on) { d.requestFreshFrame(); d.awaitFrameAfter(SystemClock.elapsedRealtime(), 400) }
         return if (on) "副屏刚才休眠了（${stateName(st)}${if (screenOff) "，手机熄屏中" else ""}），定向唤醒后已亮"
@@ -139,11 +150,27 @@ object VScreenAwake {
 
 
     /** Invoke only the shell UserService per-display IPowerManager overload; never the default-display API. */
-    private fun targetedUserActivity(d: VScreenDisplay): Boolean =
-        VScreenRemoteDisplay.userActivity(d.displayId).getOrDefault(false)
+    private fun targetedUserActivity(d: VScreenDisplay): Result<Boolean> =
+        VScreenRemoteDisplay.userActivity(d.displayId)
 
-    private fun targetedWake(d: VScreenDisplay): Boolean =
-        VScreenRemoteDisplay.wakeUpWithDisplayId(d.displayId).getOrDefault(false)
+    private fun targetedWake(d: VScreenDisplay): Result<Boolean> =
+        VScreenRemoteDisplay.wakeUpWithDisplayId(d.displayId)
+
+    private fun shortFailureReason(error: Throwable?): String {
+        val root = generateSequence(error) { it.cause }.lastOrNull() ?: error
+        val detail = root?.message?.replace(Regex("\\s+"), " ")?.trim()?.take(96)
+        return root?.javaClass?.simpleName.orEmpty().ifBlank { "Unknown" } + if (detail.isNullOrBlank()) "" else ":$detail"
+    }
+
+    private fun recordPowerFailure(stage: String, displayId: Int, error: Throwable?) {
+        val reason = if (error == null) stage else "$stage:${shortFailureReason(error)}"
+        val now = SystemClock.elapsedRealtime()
+        val key = "$displayId|$reason"
+        if (key == lastPowerLogKey && now - lastPowerLogAt < 30_000L) return
+        lastPowerLogKey = key
+        lastPowerLogAt = now
+        AppLogger.warning(TAG, "display $displayId: power stage $reason")
+    }
 
     /** Work is pending on the background screen: a chat turn owns it, or a watch runs. */
     private fun needed(): Boolean = BackgroundOperation.needsAwake()
@@ -200,4 +227,3 @@ object VScreenAwake {
         .put("note", if (d != null && !canWakeAlone(d)) "这台手机上副屏随主屏休眠：熄屏后后台任务会停住，亮屏后继续"
             else "熄屏时副屏单独保持唤醒（每 15 秒检查，熄屏时另有定时器），主屏不会被点亮")
 }
-

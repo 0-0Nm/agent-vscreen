@@ -98,7 +98,7 @@ internal object VScreenRemoteDisplay {
         try {
             data.writeInterfaceToken(VScreenDisplayService.DESCRIPTOR)
             write(data)
-            if (!b.transact(code, data, reply, 0)) error("副屏服务不认识这个调用（旧版本服务仍在运行，重连后会更新）")
+            if (!b.transact(code, data, reply, 0)) error("TRANSPORT_UNHANDLED: binder transact returned false; service did not handle the requested transaction")
             if (reply.readInt() != 0) error(reply.readString() ?: "unknown error")
             read(reply)
         } finally { data.recycle(); reply.recycle() }
@@ -206,4 +206,3 @@ internal object VScreenRemoteDisplay {
         call(VScreenDisplayService.TOUCH, { it.writeInt(displayId) }) { }
     }
 }
-

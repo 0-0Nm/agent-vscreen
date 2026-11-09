@@ -272,8 +272,11 @@ class VScreenDisplayService : Binder {
                 }
             }
         } catch (t: Throwable) {
-            val cause = (t as? java.lang.reflect.InvocationTargetException)?.targetException ?: t
-            out.writeInt(1); out.writeString("${cause.javaClass.simpleName}: ${cause.message}")
+            val cause = rootCause(t)
+            val stage = (t as? PowerStageFailure)?.stage
+            out.writeInt(1)
+            out.writeString(if (stage != null) "$stage:${cause.javaClass.simpleName}:${briefError(cause.message)}"
+                else "${cause.javaClass.simpleName}: ${cause.message}")
         }
         return true
     }
@@ -630,66 +633,83 @@ class VScreenDisplayService : Binder {
 
     private data class OwnedDisplayInfo(val displayId: Int, val groupId: Int, val flags: Int)
 
-    /** The service's own VD plus the system's real DisplayInfo; never infer ownership from a caller-supplied id. */
-    private fun ownedDisplayInfo(displayId: Int): OwnedDisplayInfo? = runCatching {
-        val vd = synchronized(displays) { displays[displayId] } ?: return null
-        val display = displayManager().getDisplay(displayId) ?: return null
-        if (vd.display.displayId != displayId || !display.isValid) return null
-        val infoClass = Class.forName("android.view.DisplayInfo")
-        val info = infoClass.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
-        val getter = android.view.Display::class.java.getDeclaredMethod("getDisplayInfo", infoClass).apply { isAccessible = true }
-        val returned = getter.invoke(display, info)
-        if (returned is Boolean && !returned) return null
-        val group = infoClass.getDeclaredField("displayGroupId").apply { isAccessible = true }.getInt(info)
-        if (group <= 0) return null
-        val flags = synchronized(displays) { meta[displayId]?.getOrNull(3) ?: 0 }
-        OwnedDisplayInfo(displayId, group, flags)
-    }.getOrNull()
+    private class PowerStageFailure(val stage: String, cause: Throwable? = null) : Exception(stage, cause)
 
-    private fun powerService(): Any? = runCatching {
-        val ctx = ShellContext(base ?: systemContext())
-        val pm = ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager ?: return null
-        val field = pm.javaClass.getDeclaredField("mService").apply { isAccessible = true }
-        field.get(pm)
-    }.getOrNull()
+    /** The service's own VD plus the system's real DisplayInfo; never infer ownership from a caller-supplied id. */
+    private fun ownedDisplayInfo(displayId: Int): OwnedDisplayInfo {
+        val vd = synchronized(displays) { displays[displayId] }
+            ?: throw PowerStageFailure("OWNERSHIP_UNAVAILABLE")
+        val display = runCatching { displayManager().getDisplay(displayId) }.getOrElse { throw PowerStageFailure("OWNERSHIP_LOOKUP_FAILED", it) }
+            ?: throw PowerStageFailure("OWNERSHIP_UNAVAILABLE")
+        if (vd.display.displayId != displayId || !display.isValid) throw PowerStageFailure("OWNERSHIP_INVALID")
+        val infoClass = runCatching { Class.forName("android.view.DisplayInfo") }
+            .getOrElse { throw PowerStageFailure("OWNERSHIP_INFO_CLASS", it) }
+        val info = runCatching { infoClass.getDeclaredConstructor().apply { isAccessible = true }.newInstance() }
+            .getOrElse { throw PowerStageFailure("OWNERSHIP_INFO_CONSTRUCTOR", it) }
+        val getter = runCatching { android.view.Display::class.java.getDeclaredMethod("getDisplayInfo", infoClass).apply { isAccessible = true } }
+            .getOrElse { throw PowerStageFailure("OWNERSHIP_INFO_METHOD", it) }
+        val returned = runCatching { getter.invoke(display, info) }.getOrElse { throw PowerStageFailure("OWNERSHIP_INFO_INVOKE", it) }
+        if (returned is Boolean && !returned) throw PowerStageFailure("OWNERSHIP_INFO_REJECTED")
+        val group = runCatching { infoClass.getDeclaredField("displayGroupId").apply { isAccessible = true }.getInt(info) }
+            .getOrElse { throw PowerStageFailure("GROUP_LOOKUP_FAILED", it) }
+        if (group <= 0) throw PowerStageFailure("GROUP_UNSAFE")
+        val flags = synchronized(displays) { meta[displayId]?.getOrNull(3) ?: 0 }
+        if (flags and OWN_DISPLAY_GROUP == 0) throw PowerStageFailure("GROUP_UNSAFE")
+        return OwnedDisplayInfo(displayId, group, flags)
+    }
+
+    private fun powerService(): Any {
+        val ctx = runCatching { ShellContext(base ?: systemContext()) }
+            .getOrElse { throw PowerStageFailure("POWERSERVICE_CONTEXT", it) }
+        val pm = runCatching { ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager }
+            .getOrElse { throw PowerStageFailure("POWERSERVICE_LOOKUP", it) }
+            ?: throw PowerStageFailure("POWERSERVICE_UNAVAILABLE")
+        val field = runCatching { pm.javaClass.getDeclaredField("mService").apply { isAccessible = true } }
+            .getOrElse { throw PowerStageFailure("POWERSERVICE_FIELD", it) }
+        return runCatching { field.get(pm) }.getOrElse { throw PowerStageFailure("POWERSERVICE_READ", it) }
+            ?: throw PowerStageFailure("POWERSERVICE_UNAVAILABLE")
+    }
 
     /** Call only IPowerManager.userActivity(displayId,...), after proving this service owns a real non-default group. */
-    private fun userActivity(displayId: Int): Boolean = runCatching {
-        val owned = ownedDisplayInfo(displayId) ?: return false
-        if (owned.flags and OWN_DISPLAY_GROUP == 0) return false
-        val service = powerService() ?: return false
+    private fun userActivity(displayId: Int): Boolean {
+        ownedDisplayInfo(displayId)
+        val service = powerService()
         val method = service.javaClass.methods.firstOrNull { m ->
             m.name == "userActivity" && m.parameterTypes.contentEquals(arrayOf(
                 Int::class.javaPrimitiveType!!, Long::class.javaPrimitiveType!!,
                 Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
             ))
-        } ?: return false
-        method.invoke(service, displayId, android.os.SystemClock.uptimeMillis(), 2, 0)
+        } ?: throw PowerStageFailure("METHOD_UNAVAILABLE")
+        runCatching { method.invoke(service, displayId, android.os.SystemClock.uptimeMillis(), 2, 0) }
+            .getOrElse { throw PowerStageFailure(if (rootCause(it) is SecurityException) "PERMISSION_DENIED" else "INVOCATION_FAILED", rootCause(it)) }
         synchronized(displays) { touched[displayId] = android.os.SystemClock.elapsedRealtime() }
-        true
-    }.getOrDefault(false)
+        return true
+    }
 
     /** Android 16+ precise wake path. Missing method/constant or DEVICE_POWER denial is a hard refusal. */
-    private fun wakeUpWithDisplayId(displayId: Int): Boolean = runCatching {
-        if (Build.VERSION.SDK_INT < 36) return false
-        val owned = ownedDisplayInfo(displayId) ?: return false
-        if (owned.flags and OWN_DISPLAY_GROUP == 0) return false
-        val service = powerService() ?: return false
+    private fun wakeUpWithDisplayId(displayId: Int): Boolean {
+        if (Build.VERSION.SDK_INT < 36) throw PowerStageFailure("SDK_UNSUPPORTED")
+        ownedDisplayInfo(displayId)
+        val service = powerService()
         val method = service.javaClass.methods.firstOrNull { m ->
             m.name == "wakeUpWithDisplayId" && m.parameterTypes.contentEquals(arrayOf(
                 Long::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
                 String::class.java, String::class.java, Int::class.javaPrimitiveType!!,
             ))
-        } ?: return false
-        val reason = android.os.PowerManager::class.java.getDeclaredField("WAKE_REASON_APPLICATION")
-            .apply { isAccessible = true }.getInt(null)
-        method.invoke(service, android.os.SystemClock.uptimeMillis(), reason, "vscreen", SHELL_PKG, displayId)
+        } ?: throw PowerStageFailure("METHOD_UNAVAILABLE")
+        val reason = runCatching { android.os.PowerManager::class.java.getDeclaredField("WAKE_REASON_APPLICATION").apply { isAccessible = true }.getInt(null) }
+            .getOrElse { throw PowerStageFailure("SDK_CONSTANT_UNAVAILABLE", it) }
+        runCatching { method.invoke(service, android.os.SystemClock.uptimeMillis(), reason, "vscreen", SHELL_PKG, displayId) }
+            .getOrElse { throw PowerStageFailure(if (rootCause(it) is SecurityException) "PERMISSION_DENIED" else "INVOCATION_FAILED", rootCause(it)) }
         synchronized(displays) { touched[displayId] = android.os.SystemClock.elapsedRealtime() }
-        true
-    }.onFailure { t ->
-        val cause = (t as? java.lang.reflect.InvocationTargetException)?.targetException ?: t
-        AppLogger.warning("VScreenDisplayService", "wakeUpWithDisplayId refused: ${cause.javaClass.simpleName}: ${cause.message}")
-    }.getOrDefault(false)
+        return true
+    }
+
+    private fun rootCause(error: Throwable): Throwable =
+        generateSequence(error) { it.cause }.lastOrNull() ?: error
+
+    private fun briefError(message: String?): String =
+        message?.replace(Regex("\\s+"), " ")?.trim()?.take(120).orEmpty().ifBlank { "no-detail" }
 
     companion object {
         const val DESCRIPTOR = "com.kilon.agentvscreen.core.VScreenDisplayService"
@@ -783,4 +803,3 @@ class VScreenDisplayService : Binder {
         ).filter { flags and it.first != 0 }.map { it.second }
     }
 }
-
