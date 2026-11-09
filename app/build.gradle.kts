@@ -13,8 +13,8 @@ android {
         applicationId = "com.kilon.agentvscreen.lab"
         minSdk = 30
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.1.6-atvsx.1"
+        versionCode = 10
+        versionName = "1.1.6-atvsx.2"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     // Release signing is read from keystore.properties (not committed). See keystore.properties.example.
@@ -96,3 +96,4 @@ dependencies {
     testImplementation("org.json:json:20231013")
     testImplementation("org.robolectric:robolectric:4.17")
 }
+
