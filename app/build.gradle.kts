@@ -28,6 +28,10 @@ android {
             storePassword = ksProps.getProperty("storePassword")
             keyAlias = ksProps.getProperty("keyAlias")
             keyPassword = ksProps.getProperty("keyPassword")
+            // v1 (JAR) as well as v2/v3: some vendor installers and scanners still read the JAR certificate.
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
     buildTypes {
