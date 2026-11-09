@@ -15,6 +15,7 @@ import android.view.InputEvent
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
+import com.kilon.agentvscreen.host.AppLogger
 import android.view.Surface
 
 /**
