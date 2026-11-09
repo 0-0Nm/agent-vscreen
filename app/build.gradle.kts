@@ -13,8 +13,8 @@ android {
         applicationId = "com.kilon.agentvscreen.lab"
         minSdk = 30
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.1.6"
+        versionCode = 9
+        versionName = "1.1.6-atvsx.1"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     // Release signing is read from keystore.properties (not committed). See keystore.properties.example.
@@ -22,7 +22,25 @@ android {
         val f = rootProject.file("keystore.properties")
         if (f.exists()) f.inputStream().use { load(it) }
     }
+    val fixedStorePath = System.getenv("ATVSX_SIGNING_STORE_FILE")?.takeIf { it.isNotBlank() }
+    val requireFixedSigning = System.getenv("ATVSX_REQUIRE_FIXED_SIGNING") == "true"
+    if (requireFixedSigning) {
+        check(fixedStorePath != null && file(fixedStorePath).isFile) { "ATVSX fixed keystore is required" }
+        for (name in listOf("ATVSX_SIGNING_STORE_PASSWORD", "ATVSX_SIGNING_KEY_PASSWORD", "ATVSX_SIGNING_KEY_ALIAS")) {
+            check(!System.getenv(name).isNullOrBlank()) { "Required signing configuration is missing: $name" }
+        }
+    }
     signingConfigs {
+        if (fixedStorePath != null) create("atvsxLongTerm") {
+            storeFile = file(fixedStorePath)
+            storeType = "PKCS12"
+            storePassword = System.getenv("ATVSX_SIGNING_STORE_PASSWORD")
+            keyPassword = System.getenv("ATVSX_SIGNING_KEY_PASSWORD")
+            keyAlias = System.getenv("ATVSX_SIGNING_KEY_ALIAS")
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
         if (ksProps.getProperty("storeFile") != null) create("release") {
             storeFile = rootProject.file(ksProps.getProperty("storeFile"))
             storePassword = ksProps.getProperty("storePassword")
@@ -35,11 +53,14 @@ android {
         }
     }
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.findByName("atvsxLongTerm") ?: signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("atvsxLongTerm") ?: signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

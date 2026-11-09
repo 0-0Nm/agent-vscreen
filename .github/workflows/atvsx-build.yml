@@ -104,8 +104,47 @@ jobs:
           PYTEST
       - name: Build Android arm64 Tailscale helper
         run: sh tsbridge/build.sh
-      - name: Assemble coexist debug APK
-        run: gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
+      - name: Assemble APK with mandatory ATVSX long-term signing
+        shell: bash
+        env:
+          ATVSX_SIGNING_KEYSTORE_BASE64: ${{ secrets.ATVSX_SIGNING_KEYSTORE_BASE64 }}
+          ATVSX_SIGNING_STORE_PASSWORD: ${{ secrets.ATVSX_SIGNING_STORE_PASSWORD }}
+          ATVSX_SIGNING_KEY_PASSWORD: ${{ secrets.ATVSX_SIGNING_KEY_PASSWORD }}
+          ATVSX_SIGNING_KEY_ALIAS: ${{ secrets.ATVSX_SIGNING_KEY_ALIAS }}
+          ATVSX_SIGNING_STORE_FILE: ${{ runner.temp }}/atvsx-signing/atvsx-release.p12
+          ATVSX_REQUIRE_FIXED_SIGNING: 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 - <<'PYSIGN'
+          import os, pathlib, base64, binascii
+          value = os.environ.get('ATVSX_SIGNING_KEYSTORE_BASE64', '')
+          if not value:
+              raise SystemExit('ATVSX signing secret is missing')
+          try:
+              raw = base64.b64decode(value, validate=True)
+          except binascii.Error:
+              raise SystemExit('ATVSX signing secret is invalid') from None
+          if not raw:
+              raise SystemExit('ATVSX signing keystore is empty')
+          dest = pathlib.Path(os.environ['ATVSX_SIGNING_STORE_FILE'])
+          dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+          with dest.open('xb') as f:
+              f.write(raw)
+          dest.chmod(0o600)
+          PYSIGN
+          gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
+      - name: Remove ephemeral signing material
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PYSIGN'
+          import os, pathlib
+          p = pathlib.Path(os.environ['RUNNER_TEMP']) / 'atvsx-signing' / 'atvsx-release.p12'
+          p.unlink(missing_ok=True)
+          if p.parent.is_dir():
+              p.parent.rmdir()
+          PYSIGN
       - name: Verify APK identity and signature
         shell: bash
         run: |
@@ -117,7 +156,16 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" > atvsx-artifacts/apk-badging.txt
           grep -q "package: name='com.kilon.agentvscreen.lab'" atvsx-artifacts/apk-badging.txt
           grep -q "application-label:'ATVSX'" atvsx-artifacts/apk-badging.txt
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK" > atvsx-artifacts/signature-verification.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > atvsx-artifacts/signature-verification.txt
+          python3 - <<'PYCERT'
+          import pathlib, re
+          expected = 'b0a09b4abb0df7196d83b83ed158c909771ae562fe28b55abdcae21938fc9900'
+          report = pathlib.Path('atvsx-artifacts/signature-verification.txt').read_text()
+          found = re.findall(r'Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F:]+)', report)
+          assert len(found) == 1 and found[0].replace(':', '').lower() == expected, 'APK is not signed by the ATVSX long-term certificate'
+          pathlib.Path('atvsx-artifacts/signing-certificate-sha256.txt').write_text(expected + '\n')
+          print('ATVSX long-term signing certificate verified')
+          PYCERT
           git rev-parse HEAD > atvsx-artifacts/source-commit.txt
           sha256sum atvsx-artifacts/ATVSX-debug.apk > atvsx-artifacts/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
