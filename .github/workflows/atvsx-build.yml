@@ -24,8 +24,6 @@ jobs:
           cache-dependency-path: tsbridge/go.sum
       - name: Set up Android SDK command-line tools
         uses: android-actions/setup-android@v4
-      - name: Set up Gradle cache
-        uses: gradle/actions/setup-gradle@v4
       - name: Verify source and prepare Android SDK
         shell: bash
         run: |
@@ -35,37 +33,59 @@ jobs:
           sha256sum app/src/main/assets/vscreen-ocr/*.onnx
           sdkmanager "platforms;android-36" "build-tools;35.0.0"
           chmod +x gradlew tsbridge/build.sh
-          test -n "$(curl --fail --silent --show-error --location --max-time 30 https://services.gradle.org/distributions/gradle-8.11.1-bin.zip.sha256)"
+      - name: Restore verified Gradle distribution
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/atvsx-gradle
+          key: atvsx-gradle-8.11.1-f397b287023acdba1e9f6fc5ea72d22dd63669d59ed4a289a29b1a76eee151c6
+      - name: Fetch and verify Gradle on cloud runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIR="$RUNNER_TEMP/atvsx-gradle"
+          mkdir -p "$DIR"
+          ZIP="$DIR/gradle-8.11.1-bin.zip"
+          EXPECTED="f397b287023acdba1e9f6fc5ea72d22dd63669d59ed4a289a29b1a76eee151c6"
+          valid() { test -f "$ZIP" && printf '%s  %s\n' "$EXPECTED" "$ZIP" | sha256sum -c - >/dev/null 2>&1; }
+          if ! valid; then
+            for URL in \
+              'https://github.com/gradle/gradle-distributions/releases/download/v8.11.1/gradle-8.11.1-bin.zip' \
+              'https://gh-proxy.com/https://github.com/gradle/gradle-distributions/releases/download/v8.11.1/gradle-8.11.1-bin.zip' \
+              'https://gh-proxy.org/https://github.com/gradle/gradle-distributions/releases/download/v8.11.1/gradle-8.11.1-bin.zip'; do
+              echo "Testing Gradle route: $URL"
+              if curl --fail --location --connect-timeout 15 --max-time 180 --retry 1 --retry-delay 2 "$URL" -o "$ZIP.partial"; then
+                if printf '%s  %s\n' "$EXPECTED" "$ZIP.partial" | sha256sum -c -; then
+                  mv "$ZIP.partial" "$ZIP"
+                  break
+                fi
+              fi
+            done
+          fi
+          valid || { echo 'No route delivered the official Gradle distribution'; exit 1; }
+          unzip -tq "$ZIP"
+          unzip -oq "$ZIP" -d "$DIR"
+          echo "$DIR/gradle-8.11.1/bin" >> "$GITHUB_PATH"
+          "$DIR/gradle-8.11.1/bin/gradle" --version
+      - uses: gradle/actions/setup-gradle@v4
       - name: Run targeted display-health unit tests
-        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest' --tests 'com.kilon.agentvscreen.cmd.ScopedDumpTest' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test.dumpIsARealHandlerRouteNotJustHelp'
+        run: gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest' --tests 'com.kilon.agentvscreen.cmd.ScopedDumpTest' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test.dumpIsARealHandlerRouteNotJustHelp'
       - name: Stage targeted test artifacts
         if: always()
         shell: bash
         run: |
           set -u
           mkdir -p atvsx-targeted-test-results
-          XML_DIR=.atvsx-build/app/test-results/testDebugUnitTest
-          REPORT_DIR=.atvsx-build/app/reports/tests/testDebugUnitTest
-          if [ -d "$XML_DIR" ]; then cp -a "$XML_DIR" atvsx-targeted-test-results/test-results; fi
-          if [ -d "$REPORT_DIR" ]; then cp -a "$REPORT_DIR" atvsx-targeted-test-results/reports; fi
-          python3 - <<'PY'
-          import glob, os, xml.etree.ElementTree as ET
-          xmls = sorted(glob.glob('.atvsx-build/app/test-results/testDebugUnitTest/**/*.xml', recursive=True))
-          tests = failures = skipped = 0
-          for path in xmls:
-              root = ET.parse(path).getroot()
-              nodes = [root] if root.tag == 'testsuite' else list(root)
-              for suite in nodes:
-                  tests += int(suite.attrib.get('tests', '0'))
-                  failures += int(suite.attrib.get('failures', '0')) + int(suite.attrib.get('errors', '0'))
-                  skipped += int(suite.attrib.get('skipped', '0'))
-          with open('atvsx-targeted-test-results/summary.txt', 'w') as f:
-              f.write(f'xml_files={len(xmls)}\ntests={tests}\nfailures={failures}\nskipped={skipped}\n')
-          if not xmls:
-              print('No Gradle XML/report files were produced')
-          else:
-              print(f'JUnit XML files: {len(xmls)}; tests={tests}; failures={failures}; skipped={skipped}')
-          PY
+          cp -a .atvsx-build/app/test-results/testDebugUnitTest atvsx-targeted-test-results/ 2>/dev/null || true
+          cp -a .atvsx-build/app/reports/tests/testDebugUnitTest atvsx-targeted-test-results/ 2>/dev/null || true
+          python3 - <<'PYTEST'
+          import json, pathlib, xml.etree.ElementTree as ET
+          root = pathlib.Path('atvsx-targeted-test-results')
+          files = list(root.rglob('TEST-*.xml'))
+          suites = [ET.parse(p).getroot() for p in files]
+          summary = {'xml_files': len(files), 'tests': sum(int(x.get('tests', 0)) for x in suites), 'failures': sum(int(x.get('failures', 0)) for x in suites), 'errors': sum(int(x.get('errors', 0)) for x in suites), 'skipped': sum(int(x.get('skipped', 0)) for x in suites), 'reports_present': bool(files)}
+          (root / 'SUMMARY.json').write_text(json.dumps(summary, indent=2))
+          print(json.dumps(summary))
+          PYTEST
       - name: Preserve targeted test artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -74,10 +94,18 @@ jobs:
           path: atvsx-targeted-test-results/
           if-no-files-found: error
           retention-days: 14
+      - name: Require actual passing JUnit results
+        shell: bash
+        run: |
+          python3 - <<'PYTEST'
+          import json
+          s = json.load(open('atvsx-targeted-test-results/SUMMARY.json'))
+          assert s['reports_present'] and s['tests'] >= 10 and s['failures'] == 0 and s['errors'] == 0 and s['skipped'] == 0, s
+          PYTEST
       - name: Build Android arm64 Tailscale helper
         run: sh tsbridge/build.sh
       - name: Assemble coexist debug APK
-        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
+        run: gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
       - name: Verify APK identity and signature
         shell: bash
         run: |
