@@ -35,6 +35,8 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         步骤：tap 目标 | press 目标 | swipe x1 y1 x2 y2 | drag x1 y1 x2 y2 … | scroll down | type 文字 | key back | wait 条件 | use 段名
         目标：x y | #N（【现在】列表的编号）| 画面上的字；动作后可加 until 条件（text:字 gone:字 change still color:x,y=#RRGGBB app:名）
         --stop 条件  --watch 2s  --keep notify|wake  --save 段名  --confirmed
+  dump [--max-nodes N] [--max-depth N]
+        只读当前副屏目标应用的原生无障碍树；最多 200 节点、深度 20、JSON 64KiB，超出会明确 truncated。无树返回结构化 unavailable；不读取主屏、不发输入、不请求新帧。
   note [文字] | note pause|resume "步骤" | note realtime on|off | note delete 编号
   keep | keep off 名字      查看 / 停止本轮之后的盯守
   events [--wait 30s]       取盯守（--keep wake）发来的事件
@@ -78,6 +80,8 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         例：act "tap 搜索; type 耳机; key enter until text:综合"
             act "drag 300 900 800 900" --watch 2s
             act --stop "text:到货" --keep notify --for 2h
+  dump [--max-nodes N] [--max-depth N]
+        只读当前副屏目标应用的原生无障碍树；默认最多 200 节点、深度 20、JSON 64KiB，超出明确 truncated。无树返回结构化 unavailable；不读主屏、不发输入、不请求新帧。
   note [文字] | note pause "<步骤>" | note resume "<步骤>" | note realtime on|off | note delete <编号|pause|resume|段名>
         给当前应用记笔记（不带参数 = 列出笔记、段和暂停/继续步骤）。下次 launch 会列出来。
         暂停和继续都记了：之后每段 act 先做继续步骤，做完、观察完再做暂停步骤（实时游戏变成回合制）
@@ -282,6 +286,25 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
     internal fun ok(args: OffloadArgs, data: Any): NativeOffloadResult {
         val body = JSONObject().put("ok", true).put("data", data).toString(2)
         return NativeOffloadResult(0, OffloadOutput.formatBody(body, args) + "\n")
+    }
+
+    private fun dumpCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
+        val maxNodes = (args.getInt("max-nodes") ?: ScopedDump.DEFAULT_MAX_NODES).also {
+            if (it !in 1..ScopedDump.DEFAULT_MAX_NODES) throw ActionError("INVALID_ARGS", "--max-nodes 必须是 1..200")
+        }
+        val maxDepth = (args.getInt("max-depth") ?: ScopedDump.DEFAULT_MAX_DEPTH).also {
+            if (it !in 0..ScopedDump.DEFAULT_MAX_DEPTH) throw ActionError("INVALID_ARGS", "--max-depth 必须是 0..20")
+        }
+        val s = sid ?: throw ActionError("NO_SESSION", "没有会话（请求头 X-VScreen-Session）")
+        return ok(args, BackgroundOperation.agentAction(s, null, isRead = true, describe = "读取副屏原生控件树") { d ->
+            val target = com.kilon.agentvscreen.core.VScreenShell.topPackage(d.displayId)
+                ?: return@agentAction JSONObject().put("available", false).put("reason", "target_package_unavailable")
+            val roots = BackgroundOperation.nodeRoots(d.displayId)
+            if (roots.isEmpty()) return@agentAction JSONObject().put("available", false).put("reason", "accessibility_unavailable")
+            val scoped = roots.map(ScopedDump::fromAndroid).filter { it.packageName == target }
+            if (scoped.isEmpty()) return@agentAction JSONObject().put("available", false).put("reason", "target_tree_unavailable").put("targetPackage", target)
+            ScopedDump.dump(scoped, target, maxNodes, maxDepth)
+        })
     }
 
     private fun errText(code: String, message: String): NativeOffloadResult =
