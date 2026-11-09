@@ -80,8 +80,6 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         例：act "tap 搜索; type 耳机; key enter until text:综合"
             act "drag 300 900 800 900" --watch 2s
             act --stop "text:到货" --keep notify --for 2h
-  dump [--max-nodes N] [--max-depth N]
-        只读当前副屏目标应用的原生无障碍树；默认最多 200 节点、深度 20、JSON 64KiB，超出明确 truncated。无树返回结构化 unavailable；不读主屏、不发输入、不请求新帧。
   note [文字] | note pause "<步骤>" | note resume "<步骤>" | note realtime on|off | note delete <编号|pause|resume|段名>
         给当前应用记笔记（不带参数 = 列出笔记、段和暂停/继续步骤）。下次 launch 会列出来。
         暂停和继续都记了：之后每段 act 先做继续步骤，做完、观察完再做暂停步骤（实时游戏变成回合制）
@@ -259,6 +257,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
     internal fun dispatch(sub: String, args: OffloadArgs, sid: String?): NativeOffloadResult = when (sub) {
         "launch" -> launchCmd(sid, args)
         "act" -> act(sid, args)
+        "dump" -> dumpCmd(sid, args)
         "note" -> noteCmd(sid, args)
         "keep" -> keepCmd(sid, args)
         "stop" -> stopCmd(sid, args)
@@ -288,7 +287,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         return NativeOffloadResult(0, OffloadOutput.formatBody(body, args) + "\n")
     }
 
-    private fun dumpCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
+    internal fun dumpCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
         val maxNodes = (args.getInt("max-nodes") ?: ScopedDump.DEFAULT_MAX_NODES).also {
             if (it !in 1..ScopedDump.DEFAULT_MAX_NODES) throw ActionError("INVALID_ARGS", "--max-nodes 必须是 1..200")
         }
@@ -296,14 +295,19 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             if (it !in 0..ScopedDump.DEFAULT_MAX_DEPTH) throw ActionError("INVALID_ARGS", "--max-depth 必须是 0..20")
         }
         val s = sid ?: throw ActionError("NO_SESSION", "没有会话（请求头 X-VScreen-Session）")
-        return ok(args, BackgroundOperation.agentAction(s, null, isRead = true, describe = "读取副屏原生控件树") { d ->
+        return ok(args, BackgroundOperation.agentAction(s, null, isRead = true, describe = "读取副屏原生控件树", strictReadOnly = true) { d ->
+            val displayMeta = JSONObject().put("display_id", d.displayId).put("generation", d.generation)
+                .put("source", "native_accessibility")
+                .put("non_atomic_tree_warning", "目标包、display 与无障碍树分别读取，返回不是原子快照；目标包可能在读取期间变化")
             val target = com.kilon.agentvscreen.core.VScreenShell.topPackage(d.displayId)
-                ?: return@agentAction JSONObject().put("available", false).put("reason", "target_package_unavailable")
+            if (target == null) return@agentAction displayMeta.put("available", false).put("reason", "target_package_unavailable")
             val roots = BackgroundOperation.nodeRoots(d.displayId)
-            if (roots.isEmpty()) return@agentAction JSONObject().put("available", false).put("reason", "accessibility_unavailable")
+            if (roots.isEmpty()) return@agentAction displayMeta.put("available", false).put("reason", "accessibility_unavailable").put("targetPackage", target)
             val scoped = roots.map(ScopedDump::fromAndroid).filter { it.packageName == target }
-            if (scoped.isEmpty()) return@agentAction JSONObject().put("available", false).put("reason", "target_tree_unavailable").put("targetPackage", target)
-            ScopedDump.dump(scoped, target, maxNodes, maxDepth)
+            if (scoped.isEmpty()) return@agentAction displayMeta.put("available", false).put("reason", "target_tree_unavailable").put("targetPackage", target)
+            ScopedDump.dump(scoped, target, maxNodes, maxDepth).also { out ->
+                displayMeta.keys().forEach { key -> out.put(key, displayMeta.get(key)) }
+            }
         })
     }
 

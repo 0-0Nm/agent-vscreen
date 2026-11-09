@@ -43,9 +43,26 @@ class ScopedDumpTest {
         assertTrue(depth.getBoolean("truncated"))
     }
 
+    @Test fun longTextIsBoundedAndCountMatchesArray() {
+        val huge = "x".repeat(200_000)
+        val json = ScopedDump.dump(listOf(N("app.target", huge, children = listOf(N("app.target", "child")))), "app.target", 200, 20)
+        val nodes = json.getJSONArray("nodes")
+        assertEquals(nodes.length(), json.getInt("nodeCount"))
+        assertTrue(nodes.getJSONObject(0).getString("text").length <= 2048)
+        assertTrue(json.toString(2).length <= ScopedDump.MAX_JSON_CHARS)
+    }
+
+    @Test fun budgetRejectDoesNotIncrementCount() {
+        val json = ScopedDump.dump(listOf(N("app.target", "x".repeat(200_000))), "app.target", 200, 20, 300)
+        assertEquals(0, json.getJSONArray("nodes").length())
+        assertEquals(0, json.getInt("nodeCount"))
+        assertTrue(json.getBoolean("truncated"))
+    }
+
     @Test fun emptyTreeIsRepresentable() {
         val json = JSONObject().put("available", false).put("reason", "accessibility_unavailable")
         assertFalse(json.getBoolean("available"))
         assertEquals("accessibility_unavailable", json.getString("reason"))
     }
 }
+

@@ -25,6 +25,7 @@ internal object ScopedDump {
     const val DEFAULT_MAX_NODES = 200
     const val DEFAULT_MAX_DEPTH = 20
     const val MAX_JSON_CHARS = 64 * 1024
+    private const val MAX_FIELD_CHARS = 2048
 
     fun fromAndroid(n: AccessibilityNodeInfo): ScopedDumpNode = object : ScopedDumpNode {
         override val packageName = n.packageName?.toString()
@@ -38,43 +39,48 @@ internal object ScopedDump {
         override val editable = n.isEditable
         override val visible = n.isVisibleToUser
         override val password = n.isPassword
+        // Do not materialize descendants until the parent has passed the output budget.
         override val children: List<ScopedDumpNode>
             get() = (0 until n.childCount).mapNotNull { runCatching { n.getChild(it) }.getOrNull()?.let(ScopedDump::fromAndroid) }
     }
 
+    private fun safeText(value: CharSequence?): String? = value?.toString()?.takeIf { it.isNotEmpty() }?.let {
+        if (it.length <= MAX_FIELD_CHARS) it else it.take(MAX_FIELD_CHARS - 1) + "…"
+    }
+
     fun dump(roots: List<ScopedDumpNode>, targetPackage: String, maxNodes: Int, maxDepth: Int, maxChars: Int = MAX_JSON_CHARS): JSONObject {
         val nodes = JSONArray()
-        var count = 0
         var truncated = false
+        fun envelope(): JSONObject = JSONObject().put("available", true).put("targetPackage", targetPackage)
+            .put("nodes", nodes).put("nodeCount", nodes.length()).put("maxNodes", maxNodes)
+            .put("maxDepth", maxDepth).put("truncated", truncated)
         fun walk(n: ScopedDumpNode, parentId: Int?, depth: Int) {
             if (truncated || n.packageName != targetPackage) return
-            if (count >= maxNodes || depth > maxDepth) { truncated = true; return }
-            val id = count++
+            if (nodes.length() >= maxNodes || depth > maxDepth) { truncated = true; return }
+            val id = nodes.length()
             val item = JSONObject()
-                .put("id", id)
-                .put("parentId", parentId ?: JSONObject.NULL)
-                .put("depth", depth)
-                .put("resourceId", n.resourceId ?: JSONObject.NULL)
-                .put("class", n.className ?: JSONObject.NULL)
+                .put("id", id).put("parentId", parentId ?: JSONObject.NULL).put("depth", depth)
+                .put("resourceId", n.resourceId ?: JSONObject.NULL).put("class", n.className ?: JSONObject.NULL)
                 .put("bounds", JSONObject().put("left", n.bounds.left).put("top", n.bounds.top).put("right", n.bounds.right).put("bottom", n.bounds.bottom))
                 .put("clickable", n.clickable).put("enabled", n.enabled).put("editable", n.editable).put("visible", n.visible)
-            if (n.password) {
-                item.put("password", true)
-                item.put("text", JSONObject.NULL)
-                item.put("contentDescription", JSONObject.NULL)
-            } else {
-                n.text?.toString()?.takeIf { it.isNotEmpty() }?.let { item.put("text", it) }
-                n.contentDescription?.toString()?.takeIf { it.isNotEmpty() }?.let { item.put("contentDescription", it) }
+            if (n.password) item.put("password", true).put("text", JSONObject.NULL).put("contentDescription", JSONObject.NULL)
+            else {
+                safeText(n.text)?.let { item.put("text", it) }
+                safeText(n.contentDescription)?.let { item.put("contentDescription", it) }
             }
-            val projected = JSONArray(nodes.toString()).put(item)
-            val candidate = JSONObject().put("available", true).put("targetPackage", targetPackage).put("nodes", projected).put("truncated", false).toString()
-            if (candidate.length > maxChars) { truncated = true; return }
+            // Check the actual pretty-printed envelope before enqueueing: nodeCount must equal nodes.length().
             nodes.put(item)
+            val withinBudget = envelope().toString(2).length <= maxChars
+            if (!withinBudget) {
+                nodes.remove(nodes.length() - 1)
+                truncated = true
+                return
+            }
             if (depth >= maxDepth) { if (n.children.isNotEmpty()) truncated = true; return }
+            // Budget is established before asking Android for children.
             for (child in n.children) walk(child, id, depth + 1)
         }
         roots.forEach { walk(it, null, 0) }
-        return JSONObject().put("available", true).put("targetPackage", targetPackage).put("nodes", nodes)
-            .put("nodeCount", count).put("maxNodes", maxNodes).put("maxDepth", maxDepth).put("truncated", truncated)
+        return envelope()
     }
 }

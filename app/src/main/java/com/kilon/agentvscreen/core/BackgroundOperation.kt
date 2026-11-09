@@ -903,6 +903,7 @@ object BackgroundOperation {
         isRead: Boolean,
         describe: String,
         freshPage: Boolean = false,
+        strictReadOnly: Boolean = false,
         block: (VScreenDisplay) -> T,
     ): T {
         val sid = sessionId ?: throw ActionError("NO_SESSION", "没有会话（请求头 X-VScreen-Session）")
@@ -917,9 +918,9 @@ object BackgroundOperation {
             userStopped = _state.value.userStopped,
             takeover = _state.value.takeoverSessionId == sid,
             generationMatches = expectedGeneration == null || expectedGeneration == d.generation,
+            isRead = isRead,
             rereadRequired = task.rereadRequired,
             freshPage = freshPage,
-            isRead = isRead,
         )) {
             VScreenDisplayHealth.PreActionBlock.USER_STOPPED -> throw ActionError("USER_STOPPED", userStoppedMessage())
             VScreenDisplayHealth.PreActionBlock.TAKEOVER -> throw ActionError("USER_TAKEOVER", "用户正在接管副屏，动作没有执行")
@@ -931,7 +932,7 @@ object BackgroundOperation {
             }
             VScreenDisplayHealth.PreActionBlock.NONE -> Unit
         }
-        if (!isRead) {
+        if (!isRead && !strictReadOnly) {
             try {
                 VScreenAwake.ensureForAction(d)?.let { _state.update { st -> st.copy(note = it) } }
             } catch (e: VScreenAwake.ActionBlocked) {
@@ -939,8 +940,8 @@ object BackgroundOperation {
             }
             actionStarted[d.displayId] = startedMs
         }
-        if (d.shellOwned) runCatching { VScreenRemoteDisplay.touch(d.displayId) }
-        runCatching { ensureUpright(d) }.onFailure { AppLogger.warning(TAG, "orientation check failed: ${it.message}") }
+        if (!strictReadOnly && d.shellOwned) runCatching { VScreenRemoteDisplay.touch(d.displayId) }
+        if (!strictReadOnly) runCatching { ensureUpright(d) }.onFailure { AppLogger.warning(TAG, "orientation check failed: ${it.message}") }
         // v27 IME guard: the system focus (and with it the keyboard) belongs to the user's screen.
         val focus0 = if (!isRead && !describe.startsWith("接力")) focusedNow() else null
         _state.update { it.copy(operating = true, action = describe.take(24)) }
@@ -948,7 +949,7 @@ object BackgroundOperation {
         try {
             val result = block(d)
             // A read, or an action that starts a new page (launch), leaves nothing stale to re-read.
-            if (isRead || freshPage) { task.rereadRequired = false; task.rereadReason = null }
+            if ((isRead && !strictReadOnly) || freshPage) { task.rereadRequired = false; task.rereadReason = null }
             logAction(LogEntry(System.currentTimeMillis(), sid, d.generation, describe, true, null, null, null,
                 SystemClock.elapsedRealtime() - tStart, isRead), d.displayId, startedMs)
             return result

@@ -98,7 +98,6 @@ class VScreenV49Test {
         val h = VScreenOffloadHandler(RuntimeEnvironment.getApplication())
         assertEquals(setOf("stop", "watch", "paused", "keep", "for", "save", "confirmed"), h.optionsOf("act"))
         assertEquals(setOf("landscape", "portrait", "restart"), h.optionsOf("launch"))
-        assertEquals(setOf("max-nodes", "max-depth"), h.optionsOf("dump"))
         assertNull(h.optionsOf("tap"))
         refused { h.checkOptions("act", listOf("--expect", "x")) }
         refused { h.checkOptions("act", listOf("--paused=1")) }
@@ -109,10 +108,17 @@ class VScreenV49Test {
         val all = Regex("--([a-z][a-z0-9-]*)").findAll(VScreenOffloadHandler.HELP).map { it.groupValues[1] }.toSet()
         VScreenOptions.SWITCHES.forEach { assertTrue("--$it documented", it in all) }
         VScreenOptions.DURATIONS.forEach { assertTrue("--$it documented", it in all) }
-        for (c in listOf("launch", "act", "dump", "note", "keep", "stop", "release", "handoff", "status", "apps", "events", "spots", "zoom", "collect", "fix")) {
+        for (c in listOf("launch", "act", "note", "keep", "stop", "release", "handoff", "status", "apps", "events", "spots", "zoom", "collect", "fix")) {
             assertFalse("help $c", h.helpFor(c).startsWith("没有叫"))
             assertTrue("quick help mentions $c", VScreenOffloadHandler.QUICK_HELP.contains(c))
         }
+    }
+
+    @Test fun dumpIsARealHandlerRouteNotJustHelp() {
+        val h = VScreenOffloadHandler(RuntimeEnvironment.getApplication())
+        val result = h.handle(NativeOffloadRequest(listOf("vscreen", "dump", "--max-nodes", "1"), "route-test"))
+        assertFalse("dump fell through to unknown command: ${result.output}", result.output.contains("没有命令 'dump'"))
+        assertFalse("dump fell through to v49 help: ${result.output}", result.output.contains("v49 只有一个操作动词"))
     }
 
     @Test fun notebookSegmentsAndProfile() {
