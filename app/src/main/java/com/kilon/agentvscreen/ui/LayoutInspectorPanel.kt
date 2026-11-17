@@ -44,12 +44,13 @@ internal fun LayoutInspectorPanel(session: String, onClose: () -> Unit) {
     var message by remember { mutableStateOf("采集中…") }
     var refresh by remember { mutableStateOf(0) }
     var busy by remember { mutableStateOf(false) }
+    var alignmentExpired by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<Int?>(null) }
     var collapsed by remember { mutableStateOf<Set<Int>>(emptySet()) }
     val state by BackgroundOperation.state.collectAsState()
     LaunchedEffect(session, refresh) {
-        snapshot = null; selected = null; collapsed = emptySet(); busy = true
+        snapshot = null; selected = null; collapsed = emptySet(); alignmentExpired = false; busy = true
         val result = withContext(Dispatchers.IO) { runCatching { LayoutInspector.capture(session) } }
         snapshot = result.getOrNull()
         message = result.fold({ if (it.data.optBoolean("available")) "只读检查 · 点框只选中，不点击应用" else "不可用：${it.data.optString("reason")}" },
@@ -73,13 +74,17 @@ internal fun LayoutInspectorPanel(session: String, onClose: () -> Unit) {
                         display.width == captured.data.optInt("width") && display.height == captured.data.optInt("height") &&
                         display.inputWidth == captured.data.optInt("input_width") && display.inputHeight == captured.data.optInt("input_height") &&
                         display.rotation * 90 == captured.data.optInt("rotation") && display.bufferTurn == captured.data.optInt("frame_turn") &&
-                        (captured.data.isNull("frame_version") || display.frameVersion.value == captured.data.optLong("frame_version")) &&
                         VScreenShell.topPackage(display.displayId) == pkg &&
                         VScreenShell.topActivity(display.displayId) == captured.data.optString("activity").takeIf { it.isNotEmpty() && it != "null" } &&
                         VScreenStore.ruleFor(pkg) != VScreenStore.Rule.BLOCK
                 }.getOrDefault(false)
             }
             if (!valid) { snapshot = null; selected = null; message = "目标页面或应用限制改变，请刷新"; break }
+            val display = BackgroundOperation.previewDisplayFor(session)
+            if (!captured.data.isNull("frame_version") && display?.frameVersion?.value != captured.data.optLong("frame_version")) {
+                alignmentExpired = true
+                message = "当前页面已有新帧；保留冻结快照供检查，刷新后重新对齐"
+            }
         }
     }
     val visible = if (owns) snapshot else null
@@ -104,7 +109,7 @@ internal fun LayoutInspectorPanel(session: String, onClose: () -> Unit) {
                         val ratio = bitmap.width.toFloat() / bitmap.height
                         val pw = minOf(maxWidth, maxHeight * ratio)
                         val ph = pw / ratio
-                        val enabled = data.optBoolean("boxes_enabled")
+                        val enabled = data.optBoolean("boxes_enabled") && !alignmentExpired
                         Box(Modifier.size(pw, ph)) {
                             Image(bitmap.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
                             if (enabled) Canvas(Modifier.fillMaxSize().pointerInput(visible) {
