@@ -126,6 +126,7 @@ class FullscreenActivity : ComponentActivity() {
         val s by BackgroundOperation.state.collectAsState()
         val mode = modeOf(s)
         val takenOver = mode == Mode.TAKEOVER
+        var inspecting by remember { mutableStateOf(false) }
         var typing by remember { mutableStateOf(false) }
         var text by remember { mutableStateOf("") }
         var hold by remember { mutableFloatStateOf(0f) }
@@ -144,6 +145,7 @@ class FullscreenActivity : ComponentActivity() {
         LaunchedEffect(session) { while (true) { left = Turns.leftMs(session) ?: -1L; delay(1000) } }
         LaunchedEffect(takenOver) { if (!takenOver) typing = false }
 
+        if (inspecting) LayoutInspectorPanel(session) { inspecting = false }
         Box(Modifier.fillMaxSize().background(Color(0xFF07080D))) {
             // The picture, fitted, with its border.
             BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 56.dp, bottom = if (typing) 140.dp else 96.dp, start = 14.dp, end = 14.dp),
@@ -215,6 +217,9 @@ class FullscreenActivity : ComponentActivity() {
                         val word = s.agentTitle ?: (Palette.word(mode) + if (mode == Mode.STANDBY && left >= 0) " · ${left / 60000}:${"%02d".format((left / 1000) % 60)} 后省电" else "")
                         Text(word, color = Color(0xCCFFFFFF), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
+                }
+                androidx.compose.material3.TextButton(onClick = { typing = false; inspecting = true }, enabled = !takenOver && !s.userStopped) {
+                    Text("布局", color = Color.White)
                 }
                 when (mode) {
                     Mode.ACTING, Mode.STANDBY -> Pill("停止 AI", Icons.Filled.Stop, Palette.stopped, Color.White) { BackgroundOperation.userStop() }

@@ -522,6 +522,12 @@ class VScreenDisplay private constructor(
         return publishedSample(SystemClock.elapsedRealtime(), notOlderThanMs)
     }
 
+    /** Read the existing bitmap metadata without waking or requesting a frame. */
+    fun cachedFrameInfo(): FrameSample? = synchronized(frameLock) {
+        // A 180-degree turn preserves dimensions but makes old bitmap coordinates invalid.
+        if (latestTurn != bufferTurn) null else publishedSample(SystemClock.elapsedRealtime())
+    }
+
     /** Compatibility bitmap-only view. Prefer [awaitFrameAfterInfo] when freshness matters. */
     fun awaitFrameAfter(notOlderThanMs: Long, timeoutMs: Long): Bitmap? =
         awaitFrameAfterInfo(notOlderThanMs, timeoutMs)?.bitmap

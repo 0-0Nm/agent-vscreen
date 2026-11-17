@@ -118,6 +118,16 @@ class VScreenV49Test {
         }
     }
 
+    @Test fun layoutIsAReadOnlyHandlerRouteWithBudgetOptions() {
+        val h = VScreenOffloadHandler(RuntimeEnvironment.getApplication())
+        assertEquals(setOf("max-nodes", "max-depth"), h.optionsOf("layout"))
+        h.checkOptions("layout", listOf("--max-nodes", "80", "--max-depth", "8"))
+        refused { h.checkOptions("layout", listOf("--max-nodes")) }
+        assertFalse(VScreenOffloadHandler.RULE_FREE.contains("layout"))
+        val result = h.handle(NativeOffloadRequest(listOf("vscreen", "layout"), "layout-route-test"))
+        assertFalse(result.output.contains("没有命令 'layout'"))
+    }
+
     @Test fun dumpIsARealHandlerRouteNotJustHelp() {
         val h = VScreenOffloadHandler(RuntimeEnvironment.getApplication())
         val result = h.handle(NativeOffloadRequest(listOf("vscreen", "dump", "--max-nodes", "80", "--max-depth", "12"), "route-test"))
