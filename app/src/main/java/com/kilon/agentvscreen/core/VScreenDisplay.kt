@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
 import com.kilon.agentvscreen.host.AppLogger
+import com.kilon.agentvscreen.host.DevilLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -294,6 +295,7 @@ class VScreenDisplay private constructor(
             pumpCounters.callbackLastAtMs.set(callbackAt)
             val img = try { r.acquireLatestImage() } catch (t: Throwable) {
                 pumpCounters.acquireFailure.incrementAndGet()
+                devilFrame(DevilLog.Event.ACQUIRE_FAILURE, DevilLog.failure(t))
                 pumpCounters.acquireLastAtMs.set(callbackAt)
                 pumpCounters.lastAcquireError = "${t.javaClass.simpleName}: ${t.message}"
                 val prev = pumpCounters.lastAcquireLogAtMs.get()
@@ -368,6 +370,7 @@ class VScreenDisplay private constructor(
         } catch (t: Throwable) {
             val failedAt = SystemClock.elapsedRealtime()
             pumpCounters.convertFailure.incrementAndGet()
+            devilFrame(DevilLog.Event.CONVERT_FAILURE, DevilLog.failure(t))
             pumpCounters.convertFailureLastAtMs.set(failedAt)
             AppLogger.warning(TAG, "frame convert failed on display $displayId: ${t.message}")
         } finally {
@@ -419,11 +422,19 @@ class VScreenDisplay private constructor(
         private set
 
     /** Detach the surface. False when it could not be done (the screen keeps running). */
+    private fun devilFrame(event: DevilLog.Event, outcome: Long = -1L) {
+        if (!DevilLog.isEnabled()) return
+        DevilLog.record(event, displayId.toLong(), generation, outcome, pumpCounters.callback.get(),
+            pumpCounters.acquireSuccess.get(), pumpCounters.acquireFailure.get(), pumpCounters.convertFailure.get(),
+            pumpCounters.publish.get(), lastFrameAtMs, latestConvertedAtMs)
+    }
+
     fun park(): Boolean {
         if (released || parked) return parked
         val ok = if (shellOwned) VScreenRemoteDisplay.park(displayId).isSuccess
         else runCatching { virtualDisplay?.surface = null; virtualDisplay != null }.getOrDefault(false)
         if (ok) parked = true
+        devilFrame(DevilLog.Event.PARK, if (ok) 1L else 0L)
         return ok
     }
 
@@ -446,6 +457,7 @@ class VScreenDisplay private constructor(
             published = publishedFrameState()
         }
         val woke = VScreenDisplayHealth.unparkRecovered(published, baseline, t0)
+        devilFrame(DevilLog.Event.RESUME, if (woke) 2L else if (ok) 1L else 0L)
         return when {
             woke -> "副屏刚从省电暂停中恢复（${SystemClock.elapsedRealtime() - t0}ms），页面保留；应用可能刚回到前台，先 read 确认"
             ok -> "副屏已从省电暂停中恢复，但还没收到新画面（静止页面可能不重绘）；先 read 确认"
@@ -535,6 +547,7 @@ class VScreenDisplay private constructor(
     fun release() {
         if (released) return
         released = true
+        devilFrame(DevilLog.Event.RELEASE)
         listener?.let { l -> runCatching { (watchContext?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)?.unregisterDisplayListener(l) } }
         listener = null
         runCatching { reader.setOnImageAvailableListener(null, null) }
@@ -582,6 +595,7 @@ class VScreenDisplay private constructor(
             val d = VScreenDisplay(e.displayId, e.width, e.height, e.dpi, gen, true, null, reader, thread,
                 shellOwned = true, trusted = VScreenDisplayService.isTrusted(e.flags), flags = e.flags)
             d.startPump()
+            d.devilFrame(DevilLog.Event.ADOPTED)
             AppLogger.info(TAG, "adopted shell display ${e.displayId} gen=$gen")
             return d
         }
@@ -606,6 +620,7 @@ class VScreenDisplay private constructor(
                 val d = VScreenDisplay(r.displayId, width, height, dpi, gen, true, null, reader, thread,
                     shellOwned = true, trusted = r.trusted, flags = r.flags)
                 d.startPump()
+            d.devilFrame(DevilLog.Event.CREATED)
                 AppLogger.info(TAG, "created shell display ${d.displayId} ${width}x$height@$dpi flags=${r.flags} trusted=${r.trusted} gen=$gen")
                 return Result.success(d)
             }
@@ -632,6 +647,7 @@ class VScreenDisplay private constructor(
             val gen = synchronized(this) { ++generationCounter }
             val d = VScreenDisplay(vd.display.displayId, width, height, dpi, gen, isPublic, vd, reader, thread)
             d.startPump()
+            d.devilFrame(DevilLog.Event.CREATED)
             AppLogger.info(TAG, "created display ${d.displayId} ${width}x$height@$dpi public=$isPublic gen=$gen")
             return Result.success(d)
         }

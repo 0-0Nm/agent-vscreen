@@ -13,6 +13,7 @@ object AppLogger {
     private val fmt = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
 
     fun init(ctx: Context) {
+        runCatching { DevilLog.init(ctx) }
         file = File(ctx.filesDir, "logs").apply { mkdirs() }.let { File(it, "agent-vscreen.log") }
     }
 

@@ -466,8 +466,19 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun Diagnostics(items: List<Setup.Item>) {
+        val devil = com.kilon.agentvscreen.host.DevilLog
+        var detailed by remember { mutableStateOf(devil.isEnabled()) }
+        var detailedTail by remember { mutableStateOf<String?>(null) }
         var open by remember { mutableStateOf(false) }
         Block("诊断", trailing = { Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null) }, onHeader = { open = !open }) {
+            Toggle("Devil Log（详细调试日志）", "默认关闭 · 单独保存副屏诊断事件", detailed) {
+                runCatching { devil.init(applicationContext); devil.setEnabled(it) }
+                detailed = devil.isEnabled(); detailedTail = null
+            }
+            if (detailed) {
+                TextButton(onClick = { detailedTail = devil.tail(20) }) { Text("读取最近详细日志") }
+                detailedTail?.let { Text(it.ifEmpty { "暂无详细日志" }, fontSize = 11.sp) }
+            }
             Text("出问题时把诊断信息发给开发者：版本、配置状态和最近日志（不含令牌、不含你输入的字）。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { copy("诊断信息", diagnostics(items)) }) { Icon(Icons.Filled.ContentCopy, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("复制") }

@@ -44,7 +44,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
   keep | keep off 名字      查看 / 停止本轮之后的盯守
   events [--wait 30s]       取盯守（--keep wake）发来的事件
   title 文字 | done         告诉用户你在做什么（悬浮窗上显示）| 这一轮做完了（副屏让出，页面保留）
-  stop | release | handoff in|out | status | apps 关键词 | spots | zoom 区域 | collect | fix
+  stop | release | handoff in|out | status | devil-log | apps 关键词 | spots | zoom 区域 | collect | fix
 一步没达到预期（until 没等到、字没输进去）这段就停在那一步，后面的不做，【注意】里写明现在的画面。
 输出很长时完整结果也存在截图目录的 last.txt（路径见 help all），可以用 head / sed 分段看。"""
 
@@ -107,6 +107,8 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         立即释放副屏
   handoff in [包名] | handoff out [包名] [--note 说明]
         in：把用户主屏上的应用移到副屏接着做（返回四段）；out：交还到主屏，需要用户本人操作时用
+  devil-log [--lines N]
+        查看详细日志状态；开启时可读最近 1..100 行，仅能在本机诊断页开关。
   status
         后台操作是否可用、副屏、权限、应用限制、正在盯守的条件
   apps [关键词]
@@ -187,11 +189,20 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         if (sub == "help") return NativeOffloadResult(0, helpFor(argv.getOrNull(1)) + "\n")
         if (argv.drop(1).contains("--help")) return NativeOffloadResult(0, helpFor(sub) + "\n")
         val sid = request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION
-        takeAdjusted()
+        if (sub != "devil-log") takeAdjusted()
         return try {
             val rest = VScreenOptions.normalize(sub, argv.drop(1))
             checkOptions(sub, rest)
             val args = VScreenOptions.args(sub, rest)
+            if (sub == "devil-log") {
+                if (args.positional.isNotEmpty()) throw ActionError("INVALID_ARGS", "只接受 --lines 1..100")
+                val lines = args.getInt("lines")
+                if (lines != null && lines !in 1..100) throw ActionError("INVALID_ARGS", "--lines 必须是 1..100")
+                val log = com.kilon.agentvscreen.host.DevilLog
+                val data = JSONObject().put("enabled", log.isEnabled()).put("local_toggle_only", true)
+                if (lines != null && log.isEnabled()) data.put("tail", log.tail(lines))
+                return ok(args, data)
+            }
             BackgroundOperation.refreshStatus()
             enforceRules(sub)
             dispatch(sub, args, sid)

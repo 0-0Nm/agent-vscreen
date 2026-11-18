@@ -117,6 +117,8 @@ object VScreenAwake {
         while (attempt && SystemClock.elapsedRealtime() - t0 < 2_000L && stateOf(d) != Display.STATE_ON) Thread.sleep(100)
         val on = stateOf(d) == Display.STATE_ON
         wakes++
+        com.kilon.agentvscreen.host.DevilLog.record(com.kilon.agentvscreen.host.DevilLog.Event.WAKE,
+            d.displayId.toLong(), d.generation, st.toLong(), if (attempt) 1L else 0L, if (on) 1L else 0L)
         val reason = if (wakeResult.isFailure) shortFailureReason(wakeResult.exceptionOrNull())
             else if (!attempt) "REMOTE_FALSE" else if (on) "DISPLAY_ON" else "ACCEPTED_BUT_STILL_OFF"
         lastWake = "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} ${if (on) "定向唤醒后已亮" else "定向唤醒后仍未亮"}（原状态 ${stateName(st)}${if (screenOff) "，主屏熄屏中" else ""}，attempt=$attempt，reason=$reason）"

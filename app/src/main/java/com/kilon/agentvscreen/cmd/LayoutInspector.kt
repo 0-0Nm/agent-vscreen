@@ -142,6 +142,7 @@ internal object LayoutInspector {
             for (i in 0 until a.length()) a.getJSONObject(i).put("number", a.getJSONObject(i).getInt("id") + 1)
             // Coordinates belong to the captured tree even when a picture cannot be trusted.
             tree.put("wireframe_enabled", iw > 0 && ih > 0 && iw == w && ih == h)
+            com.kilon.agentvscreen.host.DevilLog.layout(d.displayId, a.length(), truncated, alignment)
             return LayoutSnapshot(tree, picture).also { rememberSnapshot(it) }
     }
 }
