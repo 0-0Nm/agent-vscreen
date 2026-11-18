@@ -113,8 +113,8 @@ class FullscreenActivity : ComponentActivity() {
             AvsTheme {
                 val s by BackgroundOperation.state.collectAsState()
                 val session = s.ownerSessionId
-                LaunchedEffect(session, s.displayId) { if (session == null || s.displayId == null) finish() }
-                if (session != null) FullScreen(session)
+                LaunchedEffect(session, s.displayId) { if (s.displayId == null) finish() }
+                if (s.displayId != null) FullScreen(session ?: "local-inspector")
             }
         }
     }
@@ -145,7 +145,7 @@ class FullscreenActivity : ComponentActivity() {
         LaunchedEffect(session) { while (true) { left = Turns.leftMs(session) ?: -1L; delay(1000) } }
         LaunchedEffect(takenOver) { if (!takenOver) typing = false }
 
-        if (inspecting) LayoutInspectorPanel(session) { inspecting = false }
+        if (inspecting) LayoutInspectorPanel(lifecycle) { inspecting = false }
         Box(Modifier.fillMaxSize().background(Color(0xFF07080D))) {
             // The picture, fitted, with its border.
             BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 56.dp, bottom = if (typing) 140.dp else 96.dp, start = 14.dp, end = 14.dp),
@@ -218,7 +218,7 @@ class FullscreenActivity : ComponentActivity() {
                         Text(word, color = Color(0xCCFFFFFF), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                androidx.compose.material3.TextButton(onClick = { typing = false; inspecting = true }, enabled = !takenOver && !s.userStopped) {
+                androidx.compose.material3.TextButton(onClick = { typing = false; inspecting = true }, enabled = s.displayId != null) {
                     Text("布局", color = Color.White)
                 }
                 when (mode) {

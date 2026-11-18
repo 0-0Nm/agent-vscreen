@@ -142,7 +142,7 @@ object BackgroundOperation {
         Thread {
             val owner = _state.value.ownerSessionId
             val busy = owner != null && synchronized(lock) { tasks.containsKey(owner) }
-            if (!busy && holds == 0) releaseScreen("空闲 ${IDLE_TTL_MS / 60_000} 分钟，已释放画面（保留连接）")
+            if (!busy && holds == 0) releaseScreen("空闲 ${IDLE_TTL_MS / 60_000} 分钟，已释放画面（保留连接）", onlyIfIdle = true)
             idleReleaseAt = 0L
             // A background rule is watching this screen: keep it, look again later.
             if (holds > 0 && display != null) mainHandler.post { scheduleIdleRelease() }
@@ -151,6 +151,7 @@ object BackgroundOperation {
 
     private fun scheduleIdleRelease() {
         mainHandler.removeCallbacks(idleRelease)
+        if (inspectorViewing()) { idleReleaseAt = 0L; return }
         idleReleaseAt = SystemClock.elapsedRealtime() + IDLE_TTL_MS
         mainHandler.postDelayed(idleRelease, IDLE_TTL_MS)
     }
@@ -165,11 +166,14 @@ object BackgroundOperation {
             val s = _state.value
             val owner = s.ownerSessionId
             val busy = owner != null && synchronized(lock) { tasks.containsKey(owner) }
-            val d = display
-            if (!busy && holds == 0 && s.idle && s.takeoverSessionId == null && d != null && !d.released && VScreenStore.idlePowerSave.value) {
-                if (d.park()) {
-                    _state.update { it.copy(powerSaving = true) }
-                    AppLogger.info(TAG, "idle display ${d.displayId} paused to save power")
+            synchronized(lock) {
+                val d = display
+                if (!busy && (_state.value.ownerSessionId == null || !tasks.containsKey(_state.value.ownerSessionId)) && holds == 0 && _state.value.idle && _state.value.takeoverSessionId == null && d != null && !d.released &&
+                    !inspectorViews.active(d.displayId, d.generation, _state.value.ownerSessionId) && VScreenStore.idlePowerSave.value) {
+                    if (d.park()) {
+                        _state.update { it.copy(powerSaving = true) }
+                        AppLogger.info(TAG, "idle display ${d.displayId} paused to save power")
+                    }
                 }
             }
         }.apply { isDaemon = true; name = "vscreen-idle-park" }.start()
@@ -177,7 +181,7 @@ object BackgroundOperation {
 
     private fun scheduleIdlePark() {
         mainHandler.removeCallbacks(idlePark)
-        if (VScreenStore.idlePowerSave.value) mainHandler.postDelayed(idlePark, PARK_AFTER_MS)
+        if (!inspectorViewing() && VScreenStore.idlePowerSave.value) mainHandler.postDelayed(idlePark, PARK_AFTER_MS)
     }
 
     /** Wake a paused screen (display back on, frames flowing). Returns a note when it had been paused. */
@@ -417,12 +421,63 @@ object BackgroundOperation {
     /** v0.5: the live background screen (null when none). */
     fun currentDisplay(): VScreenDisplay? = display?.takeIf { !it.released }
 
+    // A local human inspector is not an AI task. It must never resume a stopped AI or steal its session.
+    private val inspectorViews = InspectorViewRegistry()
+    // Serialize finite local capture/prepare with explicit display teardown; never a permanent release veto.
+    private val inspectorUseLock = Any()
+    internal fun <T> withInspectorDisplay(ticket: InspectorViewTicket, block: (VScreenDisplay) -> T): T = synchronized(inspectorUseLock) {
+        val d = synchronized(lock) {
+            if (!isInspectorViewValid(ticket)) throw ActionError("STALE_SCREEN", "副屏已变化，请重新打开布局")
+            display ?: throw ActionError("NO_DISPLAY", "副屏已关闭")
+        }
+        block(d)
+    }
+    private fun inspectorViewing(): Boolean = synchronized(lock) {
+        val d = display
+        inspectorViews.active(d?.takeIf { !it.released }?.displayId, d?.generation, _state.value.ownerSessionId)
+    }
+    internal fun beginInspectorView(): InspectorViewTicket = synchronized(lock) {
+        val d = display?.takeIf { !it.released && it.displayId > 0 }
+            ?: throw ActionError("NO_DISPLAY", "副屏已关闭，请先打开副屏")
+        inspectorViews.active(d.displayId, d.generation, _state.value.ownerSessionId)
+        val ticket = inspectorViews.begin(java.util.UUID.randomUUID().toString(), d.displayId, d.generation, _state.value.ownerSessionId)
+        cancelIdleRelease()
+        mainHandler.removeCallbacks(idlePark)
+        ticket
+    }
+    internal fun isInspectorViewValid(ticket: InspectorViewTicket): Boolean = synchronized(lock) {
+        val d = display?.takeIf { !it.released }
+        inspectorViews.valid(ticket, d?.displayId, d?.generation, _state.value.ownerSessionId)
+    }
+    internal fun endInspectorView(ticket: InspectorViewTicket) {
+        synchronized(lock) {
+            val d = display
+            val applies = inspectorViews.valid(ticket, d?.displayId, d?.generation, _state.value.ownerSessionId)
+            if (!inspectorViews.end(ticket) || !applies || d == null) return
+            if (!inspectorViews.active(d.displayId, d.generation, _state.value.ownerSessionId) && _state.value.idle && !d.released) {
+                mainHandler.post { scheduleIdleRelease(); scheduleIdlePark() }
+            }
+        }
+    }
+    /** Called off the UI thread, only because a human explicitly opened the inspector. */
+    internal fun prepareInspectorView(ticket: InspectorViewTicket) = withInspectorDisplay(ticket) { d ->
+        val pkg = VScreenShell.topPackage(d.displayId) ?: throw ActionError("NO_APP", "副屏当前没有应用")
+        if (VScreenStore.ruleFor(pkg) == VScreenStore.Rule.BLOCK) throw ActionError("APP_BLOCKED", "该应用禁止读取，不能查看布局")
+        if (!isInspectorViewValid(ticket)) throw ActionError("STALE_SCREEN", "检查已关闭")
+        if (d.parked) unpark(d)
+        if (!isInspectorViewValid(ticket)) throw ActionError("STALE_SCREEN", "检查已关闭")
+        VScreenAwake.ensure(d)
+        VScreenAwake.kick("用户查看布局")
+        d.awaitFrameAfterInfo(SystemClock.elapsedRealtime(), 300)
+        Unit
+    }
+
     /** v0.5: work is pending on the background screen — the owner's chat turn is running, or a watch holds it. */
     fun needsAwake(): Boolean {
         val d = display ?: return false
         if (d.released) return false
         val owner = _state.value.ownerSessionId
-        return holds > 0 || synchronized(lock) { owner != null && owner in turns }
+        return holds > 0 || inspectorViewing() || synchronized(lock) { owner != null && owner in turns }
     }
 
     private fun restoreDownscale() {
@@ -446,11 +501,21 @@ object BackgroundOperation {
     /** Called with the display id after a screen is released, so per-display caches can be dropped. */
     fun onScreenReleased(listener: (Int) -> Unit) { releaseListeners += listener }
 
-    private fun releaseScreen(reason: String) {
+    private fun releaseScreen(reason: String, onlyIfIdle: Boolean = false) = synchronized(inspectorUseLock) {
+        releaseScreenInner(reason, onlyIfIdle)
+    }
+    private fun releaseScreenInner(reason: String, onlyIfIdle: Boolean) {
+        val d = synchronized(lock) {
+            val cur = display ?: return
+            val owner = _state.value.ownerSessionId
+            if (onlyIfIdle && (!_state.value.idle || holds > 0 || (owner != null && tasks.containsKey(owner)) || inspectorViews.active(cur.displayId, cur.generation, owner))) return
+            inspectorViews.clear()
+            display = null
+            cur
+        }
         cancelIdleRelease()
         mainHandler.removeCallbacks(idlePark)
         _state.update { it.copy(powerSaving = false) }
-        val d = synchronized(lock) { display.also { display = null } } ?: return
         // Close whatever app was left on the screen so it does not hop to the
         // main display when its display disappears.
         runCatching { VScreenShell.finger(d.displayId, "cancel", 0, -1, -1) }

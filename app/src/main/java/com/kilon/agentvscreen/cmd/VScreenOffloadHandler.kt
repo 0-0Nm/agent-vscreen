@@ -35,8 +35,9 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         步骤：tap 目标 | press 目标 | swipe x1 y1 x2 y2 | drag x1 y1 x2 y2 … | scroll down | type 文字 | key back | wait 条件 | use 段名
         目标：x y | #N（【现在】列表的编号）| 画面上的字；动作后可加 until 条件（text:字 gone:字 change still color:x,y=#RRGGBB app:名）
         --stop 条件  --watch 2s  --keep notify|wake  --save 段名  --confirmed
-  layout [--max-nodes N] [--max-depth N]
-        只读副屏布局检查快照：节点/属性、截图时间、坐标对齐警告；不唤醒、不输入、不读取主屏。
+  layout [--max-nodes N] [--max-depth N] [--snapshot L-编号]
+        只读副屏布局快照；用户可报告 L-快照号 / 节点编号，--snapshot 取回同一份历史编号，不注入输入。
+        不唤醒、不输入、不读取主屏；--snapshot 不能和 --max-nodes / --max-depth 一起使用。
   dump [--max-nodes N] [--max-depth N]
         只读当前副屏目标应用的原生无障碍树；最多 200 节点、深度 20、JSON 64KiB，超出会明确 truncated。无树返回结构化 unavailable；不读取主屏、不发输入、不请求新帧。
   note [文字] | note pause|resume "步骤" | note realtime on|off | note delete 编号
@@ -82,8 +83,9 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         例：act "tap 搜索; type 耳机; key enter until text:综合"
             act "drag 300 900 800 900" --watch 2s
             act --stop "text:到货" --keep notify --for 2h
-  layout [--max-nodes N] [--max-depth N]
-        只读副屏布局检查快照：节点/属性、截图时间、坐标对齐警告；不唤醒、不输入、不读取主屏。
+  layout [--max-nodes N] [--max-depth N] [--snapshot L-编号]
+        只读副屏布局快照；用户可报告 L-快照号 / 节点编号，--snapshot 取回同一份历史编号，不注入输入。
+        不唤醒、不输入、不读取主屏；--snapshot 不能和 --max-nodes / --max-depth 一起使用。
   dump [--max-nodes N] [--max-depth N]
         只读当前已拥有副屏的原生无障碍树；不会连接、接管、唤醒、取消 idle geometry，也不会读取主屏。
         --max-nodes 1..200；--max-depth 0..20；无活动副屏返回 NO_OWNED_SCREEN。
@@ -266,7 +268,11 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         "act" -> act(sid, args)
         "layout" -> {
             val session = sid ?: throw ActionError("NO_SESSION", "没有会话")
-            val result = LayoutInspector.capture(session, args.getInt("max-nodes") ?: 200, args.getInt("max-depth") ?: 20)
+            val reference = args.get("snapshot")
+            if (reference != null && (args.get("max-nodes") != null || args.get("max-depth") != null))
+                throw ActionError("INVALID_ARGS", "指定快照号时不能同时改变节点预算")
+            val result = if (reference != null) LayoutInspector.referenced(session, reference)
+                else LayoutInspector.capture(session, args.getInt("max-nodes") ?: 200, args.getInt("max-depth") ?: 20)
             ok(args, result.data)
         }
         "dump" -> dumpCmd(sid, args)

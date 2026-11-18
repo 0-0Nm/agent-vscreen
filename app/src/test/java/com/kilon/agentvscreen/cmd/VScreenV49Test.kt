@@ -120,7 +120,7 @@ class VScreenV49Test {
 
     @Test fun layoutIsAReadOnlyHandlerRouteWithBudgetOptions() {
         val h = VScreenOffloadHandler(RuntimeEnvironment.getApplication())
-        assertEquals(setOf("max-nodes", "max-depth"), h.optionsOf("layout"))
+        assertEquals(setOf("max-nodes", "max-depth", "snapshot"), h.optionsOf("layout"))
         h.checkOptions("layout", listOf("--max-nodes", "80", "--max-depth", "8"))
         refused { h.checkOptions("layout", listOf("--max-nodes")) }
         assertFalse(VScreenOffloadHandler.RULE_FREE.contains("layout"))
