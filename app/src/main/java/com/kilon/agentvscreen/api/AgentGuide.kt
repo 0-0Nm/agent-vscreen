@@ -1,6 +1,6 @@
 package com.kilon.agentvscreen.api
 
-/** The short text a user pastes into an agent's instructions (system prompt / memory / skill). Kept under ~1200 chars. */
+/** The short text a user pastes into an agent's instructions (system prompt / memory / skill). Keep the memory note short; detailed workflow lives in guide / help all. */
 object AgentGuide {
     /**
      * 1.1.6: the note an agent keeps in its long-term memory. Short on purpose (memories get truncated) and free of the
@@ -9,12 +9,13 @@ object AgentGuide {
     fun memory(): String = "手机上装了 ATVSX（后台副屏）：要打开、查看或操作这台手机上的任何应用时，用终端命令 `atvsx`，" +
         "它在看不见的副屏上操作，不打扰用户正在用的主屏，也不需要 adb、无线调试或 root。先 `atvsx guide` 看简明用法（`atvsx help all` 是完整说明）。" +
         "常用：`atvsx launch <应用名>`、`atvsx act \"tap 搜索; type 耳机; key enter\"`、`atvsx act`（看一眼）、做完 `atvsx done`。" +
+        "定位控件用 layout（不是旧 dump），保留 L-快照号与 number；发建议用 layout-propose，layout-wait 等回执，确认不执行点击。" +
         "如果提示没有 atvsx 命令或令牌不对，请用户在 ATVSX App 的“接入 agent”里重新复制接入的话发给你。"
 
     /** The same note for agents that call HTTP / MCP instead of a shell. */
     fun memoryHttp(): String = "手机上装了 ATVSX（后台副屏）：要打开、查看或操作这台手机上的应用时，调用它的 HTTP 接口 " +
         "POST ${ApiConfig.baseUrl}/v1/run（Authorization: Bearer <令牌>，JSON {\"cmd\": \"launch 设置\"}），或它的 MCP 工具 vscreen。" +
-        "它在看不见的副屏上操作，不打扰用户主屏，不需要 adb。先发 {\"cmd\": \"guide\"} 看简明用法。令牌在 App 的“接入 agent”里。"
+        "它在看不见的副屏上操作，不打扰用户主屏，不需要 adb。先发 {\"cmd\": \"guide\"} 看简明用法。令牌在 App 的“接入 agent”里。定位用 layout，建议用 layout-propose / layout-wait；确认只是回执，不执行修改。"
 
     /**
      * 1.1.6: what the user sends to the agent (copied by the app). The user asks, so the agent does it: install, keep
@@ -71,6 +72,10 @@ description: 在手机上后台打开、查看、操作任何应用（点、滑�
 - `atvsx launch <应用名>` 打开；`atvsx act "<步骤>; <步骤>"` 做一段：tap x y | tap #N | tap 字 | press | swipe | drag | type 字 | key back | scroll down | wait <条件> | use 段名；每步可加 until <条件>（text:字 gone:字 change still color:x,y=#色 app:名）。
 - 每次返回四块：做了什么 / 这段时间发生了什么 / 现在（编号元素 + 截图路径）/ 注意。截图要你自己看，画面什么意思由你判断，手机只报事实。
 - 例：`atvsx act "tap 搜索; type 耳机; key enter until text:综合"`；`atvsx act` = 看一眼。
+- 新版布局协作：`atvsx layout` 获取只读快照；用户发 `L-XXXXXXXX / 46号` 时，用 `atvsx layout --snapshot L-XXXXXXXX` 回读，按 nodes[].number 找框。快照号/编号成对；不是 act 的 #N，也不是节点 id；历史数据不能直接当点击坐标。不建屏、不接管、不唤醒、不读主屏。
+- 请求定位确认：`atvsx layout-propose --snapshot L-XXXXXXXX --node 46 --change "请确认此框是否为目标控件"`。用实际快照号/编号替换示例；拿到 id 后，同一会话 `atvsx layout-wait --id <建议ID> --wait 30s`，或 `layout-review --id <建议ID>` 即时查，`layout-withdraw --id <建议ID>` 撤回。只允许一条待确认；约5分钟过期。
+- 用户从通知/浮窗「待确认」进入布局，打开「查看 AI 建议」，核对高亮框后确认/驳回。贴边小窗对每条新建议只展开提醒一次，不强开全屏、不恢复用户主动关闭的浮窗。加载失败可重试；等待时间不控制按钮能否点击。
+- PENDING 或 timed_out=true 不是同意；APPROVED / receipt_only=true 只确认控件与建议，不点击、不改文件、不授予执行权限。后续操作另按用户目标授权，先重新看画面。STALE/EXPIRED 时重新定位；禁止反复套用旧编号。layout-wait 单次最多30秒，超时告知用户，不忙循环。dump 只用于原生树排障，不替代新版编号与确认。
 - 实时游戏：`atvsx note pause "<暂停步骤>"` 和 `note resume "<继续步骤>"` 记下后，每段 act 自动 继续→动作→观察→暂停。
 - 之后继续盯：`atvsx act --stop "text:到货" --keep notify`（通知用户）或 `--keep wake`（之后用 `atvsx events --wait 60s` 取）。
 - 一步没达到预期（until 没等到、字没输进去）这段就停在那步，后面不做，注意块写现在的画面：看图再决定。type 前先点输入框，等它标“有焦点”。

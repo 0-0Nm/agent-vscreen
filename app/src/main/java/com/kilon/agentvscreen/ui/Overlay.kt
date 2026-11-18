@@ -96,6 +96,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.kilon.agentvscreen.cmd.InspectorProposals
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -141,7 +142,12 @@ object Overlay {
     private var owner: OverlayOwner? = null
     internal var lp: WindowManager.LayoutParams? = null
     private var job: Job? = null
+    private var reviewJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var lastObservedReviewId: String? = null
+    private var autoExpandedReviewId: String? = null
+    private var suppressedReviewId: String? = null
+    private val gestureActive = MutableStateFlow(false)
 
     // UI state, main thread only.
     internal val widthPx = mutableFloatStateOf(0f)
@@ -163,22 +169,42 @@ object Overlay {
     fun attach(c: Context) {
         ctx = c.applicationContext
         job?.cancel()
+        reviewJob?.cancel()
         job = scope.launch {
+            var wasVisible: Boolean? = null
             combine(BackgroundOperation.state.map { it.displayId != null && it.showPreview && !it.windowHidden }.distinctUntilChanged(), fullscreenOpen) { up, full -> up to full }
                 .distinctUntilChanged().collect { (up, full) ->
+                    val state = BackgroundOperation.state.value
+                    if (wasVisible == true && !full && (!state.showPreview || state.windowHidden)) suppressCurrentReview("preview/user close")
+                    wasVisible = up
                     AppLogger.info("Overlay", when { !up -> "no screen / preview off / closed by the user: hide"; full -> "full-screen page in front: hide"; else -> "screen up: show" })
                     if (up && !full) show() else hide()
                 }
         }
+        reviewJob = scope.launch {
+            InspectorProposals.state.collect { proposal ->
+                val pending = proposal?.takeIf { it.status == "PENDING" }
+                if (pending == null) {
+                    lastObservedReviewId = null
+                    return@collect
+                }
+                if (pending.id == lastObservedReviewId) return@collect
+                // Consume the proposal event before checking geometry. A skipped event must never be replayed by a
+                // later gesture/fullscreen/visibility change and unexpectedly take the window back from the user.
+                lastObservedReviewId = pending.id
+                maybeAutoExpandReview(pending)
+            }
+        }
     }
 
-    fun detach() { job?.cancel(); job = null; hide() }
+    fun detach() { job?.cancel(); reviewJob?.cancel(); job = null; reviewJob = null; hide() }
 
     /** Re-check after the overlay permission was granted. */
     fun refresh() { val s = BackgroundOperation.state.value; if (s.displayId != null && s.showPreview && !s.windowHidden && !fullscreenOpen.value) show() }
 
     /** 1.1.6: the × button. One tap, never a lock: see [BackgroundOperation.closeWindow]. */
     fun closeTapped() {
+        suppressCurrentReview("user close")
         val msg = BackgroundOperation.closeWindow()
         ctx?.let { android.widget.Toast.makeText(it, msg, android.widget.Toast.LENGTH_LONG).show() }
     }
@@ -190,6 +216,36 @@ object Overlay {
             if (root != null && want != hostedByA11y) { AppLogger.info("Overlay", "rehost (a11y=$want)"); hide(); refresh() }
         }
     }
+
+    private fun suppressCurrentReview(reason: String) {
+        InspectorProposals.state.value?.takeIf { it.status == "PENDING" }?.let {
+            suppressedReviewId = it.id
+            AppLogger.info("Overlay", "review auto-expand suppressed ($reason, id=${it.id})")
+        }
+    }
+
+    private fun maybeAutoExpandReview(proposal: com.kilon.agentvscreen.cmd.InspectorProposal) {
+        val state = BackgroundOperation.state.value
+        val visible = state.displayId != null && state.showPreview && !state.windowHidden
+        val matches = proposal.displayId == state.displayId && proposal.generation == state.generation
+        val shouldExpand = ReviewAttentionPolicy.shouldAutoExpand(ReviewAttentionSnapshot(
+            proposalId = proposal.id,
+            pending = proposal.status == "PENDING",
+            matchesCurrentDisplay = matches,
+            previewVisible = visible,
+            fullscreenVisible = fullscreenOpen.value,
+            docked = docked.value,
+            gestureActive = gestureActive.value,
+            alreadyReminded = proposal.id == autoExpandedReviewId || proposal.id == suppressedReviewId,
+        ))
+        if (!shouldExpand) return
+        // Mark before undocking: state/Compose callbacks can synchronously re-emit the same proposal.
+        autoExpandedReviewId = proposal.id
+        undock()
+        AppLogger.info("Overlay", "review pending: expand docked window once (id=${proposal.id})")
+    }
+
+    internal fun setGestureActive(active: Boolean) { gestureActive.value = active }
 
     private fun prefs() = ctx!!.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -601,6 +657,7 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
         val docked = Overlay.docked.value
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                Overlay.setGestureActive(true)
                 claim = Claim.NONE
                 Overlay.stopAnim(); trail.clear()
                 downRaw = Offset(ev.rawX, ev.rawY); downLocal = Offset(ev.x, ev.y); lastLocal = downLocal
@@ -672,6 +729,7 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
             MotionEvent.ACTION_POINTER_UP -> return true
             MotionEvent.ACTION_UP -> {
                 stopHold()
+                Overlay.setGestureActive(false)
                 val ms = SystemClock.uptimeMillis() - downAt
                 when (claim) {
                     Claim.PINCH -> Overlay.save()
@@ -716,6 +774,7 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
             }
             MotionEvent.ACTION_CANCEL -> {
                 stopHold(); cancelChildren(ev)
+                Overlay.setGestureActive(false)
                 if (claim == Claim.MOVE) {
                     if (Overlay.docked.value) Overlay.lp?.let { Overlay.dock(Overlay.dockRight.value, it.y) } else { Overlay.resetShrink(); Overlay.settle() }
                 }

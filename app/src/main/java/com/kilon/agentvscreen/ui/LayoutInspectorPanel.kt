@@ -102,7 +102,8 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, initialProposalId: Strin
     var onlyClickable by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var collapsed by remember { mutableStateOf<Set<Int>>(emptySet()) }
-    var requestSerial by remember { mutableIntStateOf(0) }
+    val loadGate = remember { InspectorLoadGate() }
+    var activeLoad by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var capturing by remember { mutableStateOf(false) }
     var toolOffset by remember { mutableStateOf(Offset.Zero) }
     val backgroundState by BackgroundOperation.state.collectAsState()
@@ -110,7 +111,6 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, initialProposalId: Strin
     val proposal = proposalState?.takeIf { it.displayId == ticket?.displayId && it.generation == ticket?.generation }
     var toolSize by remember { mutableStateOf(IntSize.Zero) }
     var reviewBusy by remember { mutableStateOf(false) }
-    var autoReviewDone by remember(initialProposalId) { mutableStateOf(false) }
     var toolDragging by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -119,7 +119,8 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, initialProposalId: Strin
     fun closeOnce() {
         ticket?.let { BackgroundOperation.endInspectorView(it) }
         ticket = null
-        requestSerial++
+        loadGate.invalidate()
+        activeLoad?.cancel(); activeLoad = null
         onClose()
     }
 
@@ -137,8 +138,10 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, initialProposalId: Strin
                     ticket = null
                     snapshot = null
                     selectedId = null
-                    requestSerial++
+                    loadGate.invalidate()
+                    activeLoad?.cancel(); activeLoad = null
                     capturing = false
+                    reviewBusy = false
                     status = "页面已暂停"
                 }
                 else -> Unit
@@ -147,43 +150,79 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, initialProposalId: Strin
         lifecycle.addObserver(observer)
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) begin()
         onDispose {
+            loadGate.invalidate()
+            activeLoad?.cancel(); activeLoad = null
             lifecycle.removeObserver(observer)
             ticket?.let { BackgroundOperation.endInspectorView(it) }
             ticket = null
         }
     }
 
-    LaunchedEffect(ticket, refresh) {
-        val current = ticket ?: return@LaunchedEffect
-        val serial = ++requestSerial
+    suspend fun loadLayout(current: InspectorViewTicket, review: com.kilon.agentvscreen.cmd.InspectorProposal?) {
+        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+        if (activeLoad !== job) activeLoad?.cancel()
+        activeLoad = job
+        val serial = loadGate.begin()
         capturing = true
+        reviewBusy = review != null
+        if (review != null) toolOpen = true
         snapshot = null
         selectedId = null
         collapsed = emptySet()
         zoom = 1f
         pan = Offset.Zero
-        status = "正在采集…"
-        val result = withContext(Dispatchers.IO) {
-            runCatching {
-                coroutineContext.ensureActive()
-                BackgroundOperation.prepareInspectorView(current)
+        status = if (review == null) "正在采集布局…" else "正在读取 AI 建议…"
+        try {
+            val result = withContext(Dispatchers.IO) {
                 coroutineContext.ensureActive()
                 if (!BackgroundOperation.isInspectorViewValid(current)) error("DISPLAY_CLOSED")
-                LayoutInspector.captureLocal(current, maxNodes = 200, maxDepth = 20)
+                val loaded = if (review == null) {
+                    BackgroundOperation.prepareInspectorView(current)
+                    coroutineContext.ensureActive()
+                    LayoutInspector.captureLocal(current, maxNodes = 200, maxDepth = 20)
+                } else LayoutInspector.openProposalForLocal(review.reference, current)
+                coroutineContext.ensureActive()
+                loaded
+            }
+            if (!loadGate.isCurrent(serial) || ticket !== current || !BackgroundOperation.isInspectorViewValid(current)) return
+            if (review != null && InspectorProposals.state.value?.let { it.id != review.id || it.status != "PENDING" } != false) {
+                status = "建议已变化，请查看最新请求"
+                return
+            }
+            if (result == null) {
+                status = "AI 建议快照已过期或不匹配，请 AI 重新定位"
+            } else {
+                snapshot = result
+                if (review != null) {
+                    selectedId = result.boxes().firstOrNull { it.id + 1 == review.number }?.id
+                    onlyClickable = false
+                    status = "历史线框 · ${review.reference} / ${review.number}号"
+                } else status = LayoutInspectorPresentation.status(result.data.optString("alignment").ifBlank { if (result.data.optBoolean("available", true)) "READY" else result.data.optString("reason") })
+            }
+        } catch (cancel: kotlinx.coroutines.CancellationException) {
+            throw cancel
+        } catch (error: Exception) {
+            if (loadGate.isCurrent(serial) && ticket === current) {
+                snapshot = null
+                status = "读取失败：${LayoutInspectorPresentation.status(error.message ?: error.javaClass.simpleName)}；可重试或刷新"
+            }
+        } finally {
+            if (loadGate.finish(serial)) {
+                capturing = false
+                reviewBusy = false
+                if (activeLoad === job) activeLoad = null
             }
         }
-        coroutineContext.ensureActive()
-        if (serial != requestSerial) return@LaunchedEffect
-        capturing = false
-        if (ticket !== current || !BackgroundOperation.isInspectorViewValid(current)) {
-            snapshot = null
-            status = "副屏已关闭"
-            return@LaunchedEffect
+    }
+
+    // A proposal entrance chooses its historical snapshot instead of racing a fresh capture.
+    LaunchedEffect(ticket, refresh, initialProposalId) {
+        val current = ticket ?: return@LaunchedEffect
+        val review = InspectorProposals.state.value?.takeIf {
+            refresh == 0 && initialProposalId != null && it.id == initialProposalId && it.status == "PENDING" &&
+                it.displayId == current.displayId && it.generation == current.generation
         }
-        result.fold(
-            { snap -> snapshot = snap; status = LayoutInspectorPresentation.status(snap.data.optString("alignment").ifBlank { if (snap.data.optBoolean("available", true)) "READY" else snap.data.optString("reason") }) },
-            { error -> snapshot = null; status = LayoutInspectorPresentation.status(error.message ?: error.javaClass.simpleName) },
-        )
+        loadLayout(current, review)
     }
 
     val validView = ticket?.let { BackgroundOperation.isInspectorViewValid(it) } == true && backgroundState.displayId == ticket?.displayId
@@ -215,25 +254,6 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, initialProposalId: Strin
         }
     }
 
-    LaunchedEffect(ticket, proposalState, initialProposalId) {
-        val t = ticket ?: return@LaunchedEffect
-        val p = proposalState ?: return@LaunchedEffect
-        if (autoReviewDone || initialProposalId == null || p.id != initialProposalId || p.status != "PENDING") return@LaunchedEffect
-        autoReviewDone = true
-        toolOpen = true
-        reviewBusy = true
-        val serial = ++requestSerial
-        val opened = withContext(Dispatchers.IO) { LayoutInspector.openProposalForLocal(p.reference, t) }
-        if (serial != requestSerial || ticket !== t) { reviewBusy = false; return@LaunchedEffect }
-        if (opened == null) { status = "AI 建议快照已过期或不匹配" } else {
-            snapshot = opened
-            selectedId = opened.boxes().firstOrNull { it.id + 1 == p.number }?.id
-            onlyClickable = false
-            zoom = 1f; pan = Offset.Zero
-            status = "历史线框 · ${p.reference} / ${p.number}号"
-        }
-        reviewBusy = false
-    }
 
     val boxes = remember(snap) { snap?.boxes().orEmpty() }
     val nodes = remember(snap) { snap?.data?.optJSONArray("nodes")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty() }
@@ -324,23 +344,8 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, initialProposalId: Strin
                                     if (proposal.status == "PENDING") {
                                         TextButton(enabled = !reviewBusy && !capturing, onClick = {
                                             val t = ticket ?: return@TextButton
-                                            reviewBusy = true
-                                            val serial = ++requestSerial
-                                            scope.launch {
-                                                try {
-                                                    val opened = withContext(Dispatchers.IO) { LayoutInspector.openProposalForLocal(proposal.reference, t) }
-                                                    if (serial != requestSerial || ticket !== t || InspectorProposals.state.value?.id != proposal.id) return@launch
-                                                    if (opened == null) status = "AI 建议快照已过期或不匹配"
-                                                    else {
-                                                        snapshot = opened
-                                                        selectedId = opened.boxes().firstOrNull { it.id + 1 == proposal.number }?.id
-                                                        onlyClickable = false
-                                                        zoom = 1f; pan = Offset.Zero
-                                                        status = "历史线框 · ${proposal.reference} / ${proposal.number}号"
-                                                    }
-                                                } finally { reviewBusy = false }
-                                            }
-                                        }) { Text("查看 AI 建议（${proposal.number}号）") }
+                                            scope.launch { loadLayout(t, proposal) }
+                                        }) { Text(if (capturing || reviewBusy) "正在读取，请稍候…" else "查看 AI 建议（${proposal.number}号）") }
                                     } else Text(when (proposal.status) {
                                         "APPROVED" -> "已确认，仅生成确认回执"
                                         "REJECTED" -> "已驳回"
@@ -405,6 +410,12 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, initialProposalId: Strin
                 verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { ticket?.let { BackgroundOperation.endInspectorView(it) }; ticket = null; onMinimize() }) { Text("缩小") }
                 Text(status, color = Color(0xFF9CCBFF), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                if (snap == null && proposal?.status == "PENDING") {
+                    TextButton(enabled = ticket != null && !capturing && !reviewBusy, onClick = {
+                        val current = ticket ?: return@TextButton
+                        scope.launch { loadLayout(current, proposal) }
+                    }) { Text("重试建议") }
+                }
                 TextButton(onClick = { refresh++ }, enabled = ticket != null && !capturing && !reviewBusy) { Text("刷新") }
                 TextButton(onClick = ::closeOnce) { Text("退出布局") }
             }

@@ -38,6 +38,9 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
   layout [--max-nodes N] [--max-depth N] [--snapshot L-编号]
         只读副屏布局快照；用户可报告 L-快照号 / 节点编号，--snapshot 取回同一份历史编号，不注入输入。
         不唤醒、不输入、不读取主屏；--snapshot 不能和 --max-nodes / --max-depth 一起使用。
+  layout-propose --snapshot L-编号 --node N --change 单行建议
+  layout-wait --id 建议ID [--wait 30s] | layout-review --id 建议ID | layout-withdraw --id 建议ID
+        请求用户确认框；同一会话等回执，超时不是同意，确认不会点击/修改。layout编号不是act的#N。
   dump [--max-nodes N] [--max-depth N]
         只读当前副屏目标应用的原生无障碍树；最多 200 节点、深度 20、JSON 64KiB，超出会明确 truncated。无树返回结构化 unavailable；不读取主屏、不发输入、不请求新帧。
   note [文字] | note pause|resume "步骤" | note realtime on|off | note delete 编号
@@ -109,6 +112,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         in：把用户主屏上的应用移到副屏接着做（返回四段）；out：交还到主屏，需要用户本人操作时用
   layout-propose --snapshot L-编号 --node N --change 修改建议
         标记副屏快照中的一个框，请用户在本机布局面板确认；不会点击或修改。
+        用户用「查看 AI 建议」核对高亮后确认；贴边小窗对每条新建议展开一次。用同一会话查询/等待回执。
   layout-withdraw --id 建议ID
         撤回本会话待确认建议。
   layout-wait --id 建议ID [--wait 30s]

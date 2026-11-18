@@ -68,7 +68,7 @@ jobs:
           "$DIR/gradle-8.11.1/bin/gradle" --version
       - uses: gradle/actions/setup-gradle@v4
       - name: Run targeted display-health unit tests
-        run: gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest' --tests 'com.kilon.agentvscreen.core.VScreenPowerPolicyTest' --tests 'com.kilon.agentvscreen.cmd.ScopedDumpTest' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test.dumpIsARealHandlerRouteNotJustHelp' --tests 'com.kilon.agentvscreen.core.VScreenDisplayServiceProtocolTest' --tests 'com.kilon.agentvscreen.ui.OverlayGeometryTest' --tests 'com.kilon.agentvscreen.core.FramePumpDiagnosticsTest' --tests 'com.kilon.agentvscreen.cmd.LayoutInspectorPolicyTest' --tests 'com.kilon.agentvscreen.core.InspectorViewRegistryTest' --tests 'com.kilon.agentvscreen.cmd.LayoutInspectorV2Test' --tests 'com.kilon.agentvscreen.core.ManualDisplayPolicyTest' --tests 'com.kilon.agentvscreen.core.ManualPickerTest' --tests 'com.kilon.agentvscreen.host.DevilLogTest' --tests 'com.kilon.agentvscreen.cmd.InspectorReviewTest' --tests 'com.kilon.agentvscreen.cmd.InspectorWaitTest'
+        run: gradle --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --tests 'com.kilon.agentvscreen.core.DisplayHealthGuardTest' --tests 'com.kilon.agentvscreen.core.VScreenPowerPolicyTest' --tests 'com.kilon.agentvscreen.cmd.ScopedDumpTest' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test' --tests 'com.kilon.agentvscreen.cmd.VScreenV49Test.dumpIsARealHandlerRouteNotJustHelp' --tests 'com.kilon.agentvscreen.core.VScreenDisplayServiceProtocolTest' --tests 'com.kilon.agentvscreen.ui.OverlayGeometryTest' --tests 'com.kilon.agentvscreen.core.FramePumpDiagnosticsTest' --tests 'com.kilon.agentvscreen.cmd.LayoutInspectorPolicyTest' --tests 'com.kilon.agentvscreen.core.InspectorViewRegistryTest' --tests 'com.kilon.agentvscreen.cmd.LayoutInspectorV2Test' --tests 'com.kilon.agentvscreen.core.ManualDisplayPolicyTest' --tests 'com.kilon.agentvscreen.core.ManualPickerTest' --tests 'com.kilon.agentvscreen.ui.InspectorLoadGateTest' --tests 'com.kilon.agentvscreen.ui.ReviewAttentionPolicyTest' --tests 'com.kilon.agentvscreen.api.AgentGuideReviewTest' --tests 'com.kilon.agentvscreen.host.DevilLogTest' --tests 'com.kilon.agentvscreen.cmd.InspectorReviewTest' --tests 'com.kilon.agentvscreen.cmd.InspectorWaitTest'
       - name: Stage targeted test artifacts
         if: always()
         shell: bash
@@ -156,8 +156,8 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" > atvsx-artifacts/apk-badging.txt
           grep -q "package: name='com.kilon.agentvscreen.lab'" atvsx-artifacts/apk-badging.txt
           grep -q "application-label:'ATVSX'" atvsx-artifacts/apk-badging.txt
-          grep -q "versionCode='20'" atvsx-artifacts/apk-badging.txt
-          grep -q "versionName='1.1.6-atvsx.12'" atvsx-artifacts/apk-badging.txt
+          grep -q "versionCode='21'" atvsx-artifacts/apk-badging.txt
+          grep -q "versionName='1.1.6-atvsx.13'" atvsx-artifacts/apk-badging.txt
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > atvsx-artifacts/signature-verification.txt
           python3 - <<'PYCERT'
           import pathlib, re
