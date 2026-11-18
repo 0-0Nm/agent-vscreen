@@ -14,18 +14,45 @@ internal data class InspectorProposal(val id: String, val reference: String, val
 
 /** Review receipt only. No API here performs input, modifies a file or grants edit permissions. */
 internal object InspectorProposals {
-    private const val TTL = 120_000L
+    internal const val TTL = 300_000L
     private data class Entry(val proposal: InspectorProposal, val owner: String, val created: Long, val tree: String)
-    private val lock = Any()
+    private val lock = java.lang.Object()
     private val mutable = MutableStateFlow<InspectorProposal?>(null)
     val state = mutable.asStateFlow()
     private var current: Entry? = null
 
     private fun now() = SystemClock.elapsedRealtime()
-    private fun publish(entry: Entry) { current = entry; mutable.value = entry.proposal }
-    private fun expire(e: Entry): Entry = if (e.proposal.status == "PENDING" && !ReviewGate.within(e.created, now(), TTL)) {
-        e.copy(proposal = e.proposal.copy(status = "EXPIRED")).also(::publish)
-    } else e
+    private fun publish(entry: Entry) { current = entry; mutable.value = entry.proposal; lock.notifyAll() }
+    private fun reconcile(e: Entry): Entry {
+        val p = e.proposal
+        if (p.status != "PENDING") return e
+        val status = ReviewGate.pendingStatus(e.created, now(), TTL,
+            BackgroundOperation.state.value.let { it.displayId == p.displayId && it.generation == p.generation && it.ownerSessionId == e.owner })
+        return if (status != "PENDING") e.copy(proposal = p.copy(status = status)).also(::publish) else e
+    }
+    fun refreshPending() = synchronized(lock) { current?.let(::reconcile); Unit }
+    fun remainingMs(id: String): Long = synchronized(lock) {
+        val e = current?.takeIf { it.proposal.id == id && it.proposal.status == "PENDING" } ?: return@synchronized 0L
+        (TTL - (now() - e.created)).coerceIn(0L, TTL)
+    }
+
+    /** Bounded, session-scoped wait; wait() releases the lock so local review can complete. */
+    fun await(session: String, id: String, waitMs: Long): JSONObject = synchronized(lock) {
+        val deadline = now() + waitMs.coerceIn(1L, 30_000L)
+        while (true) {
+            val e = current?.takeIf { it.owner == session && it.proposal.id == id }?.let(::reconcile)
+                ?: throw ActionError("PROPOSAL_NOT_FOUND", "对本会话没有这条建议")
+            if (e.proposal.status != "PENDING") return@synchronized json(e.proposal).put("timed_out", false)
+            val until = minOf(deadline, e.created + TTL) - now()
+            if (until <= 0L) return@synchronized json(reconcile(e).proposal).put("timed_out", now() >= deadline)
+            try { lock.wait(until) } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw ActionError("WAIT_INTERRUPTED", "等待已中断；没有确认或执行修改")
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        error("unreachable")
+    }
 
     fun submit(session: String, reference: String, number: Int, description: String): JSONObject {
         if (!ReviewGate.validDescription(description) || number !in 1..200)
@@ -34,7 +61,7 @@ internal object InspectorProposals {
         val data = snapshot.data
         val tree = LayoutInspector.reviewFingerprint(data, number) ?: throw ActionError("INVALID_TARGET", "该快照没有这个可选控件，或页面含敏感节点、布局截断")
         return synchronized(lock) {
-            current?.let { expire(it) }?.takeIf { it.proposal.status == "PENDING" }?.let {
+            current?.let { reconcile(it) }?.takeIf { it.proposal.status == "PENDING" }?.let {
                 throw ActionError("PROPOSAL_PENDING", "已有待确认的建议，请先在本机处理")
             }
             val p = InspectorProposal(UUID.randomUUID().toString(), data.getString("human_ref"), number, description.trim(),
@@ -47,11 +74,11 @@ internal object InspectorProposals {
     fun read(session: String, id: String): JSONObject = synchronized(lock) {
         val e = current?.takeIf { it.owner == session && it.proposal.id == id }
             ?: throw ActionError("PROPOSAL_NOT_FOUND", "对本会话没有这条建议")
-        json(expire(e).proposal)
+        json(reconcile(e).proposal)
     }
 
     fun withdraw(session: String, id: String): JSONObject = synchronized(lock) {
-        val e = current?.takeIf { it.owner == session && it.proposal.id == id }?.let(::expire)
+        val e = current?.takeIf { it.owner == session && it.proposal.id == id }?.let(::reconcile)
             ?: throw ActionError("PROPOSAL_NOT_FOUND", "对本会话没有这条建议")
         if (e.proposal.status != "PENDING") return@synchronized json(e.proposal)
         val cancelled = e.proposal.copy(status = "CANCELLED")
@@ -59,7 +86,7 @@ internal object InspectorProposals {
     }
 
     fun decideLocal(id: String, ticket: InspectorViewTicket, approve: Boolean): Boolean {
-        val entry = synchronized(lock) { current?.let(::expire)?.takeIf { it.proposal.id == id && it.proposal.status == "PENDING" } } ?: return false
+        val entry = synchronized(lock) { current?.let(::reconcile)?.takeIf { it.proposal.id == id && it.proposal.status == "PENDING" } } ?: return false
         val p = entry.proposal
         if (ticket.owner != entry.owner || ticket.displayId != p.displayId || ticket.generation != p.generation ||
             !BackgroundOperation.isInspectorViewValid(ticket)) return false
@@ -69,7 +96,7 @@ internal object InspectorProposals {
         val ticketStillValid = BackgroundOperation.isInspectorViewValid(ticket) &&
             (!approve || BackgroundOperation.state.value.let { !it.userStopped && it.takeoverSessionId == null })
         return synchronized(lock) {
-            val live = current?.let(::expire)
+            val live = current?.let(::reconcile)
             if (live !== entry || !ticketStillValid) return@synchronized false
             val status = if (!approve) "REJECTED" else if (fresh != null && LayoutInspector.reviewFingerprint(fresh, p.number) == entry.tree) "APPROVED" else "STALE"
             publish(entry.copy(proposal = p.copy(status = status)))
@@ -82,5 +109,10 @@ internal object InspectorProposals {
 
 internal object ReviewGate {
     fun within(start: Long, now: Long, ttl: Long): Boolean = now >= start && now - start < ttl
+    fun pendingStatus(start: Long, now: Long, ttl: Long, sameDisplay: Boolean): String = when {
+        !within(start, now, ttl) -> "EXPIRED"
+        !sameDisplay -> "STALE"
+        else -> "PENDING"
+    }
     fun validDescription(value: String): Boolean = value.trim().length in 1..240 && value.none { it.isISOControl() || Character.getType(it) == Character.FORMAT.toInt() }
 }

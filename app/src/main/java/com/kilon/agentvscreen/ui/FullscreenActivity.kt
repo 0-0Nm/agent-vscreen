@@ -81,12 +81,14 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.kilon.agentvscreen.api.Turns
+import com.kilon.agentvscreen.cmd.InspectorProposals
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.core.VScreenHandoff
 import com.kilon.agentvscreen.core.VScreenShell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
@@ -126,7 +128,16 @@ class FullscreenActivity : ComponentActivity() {
         val s by BackgroundOperation.state.collectAsState()
         val mode = modeOf(s)
         val takenOver = mode == Mode.TAKEOVER
+        val proposal by InspectorProposals.state.collectAsState()
+        var reviewProposalId by remember { mutableStateOf(intent.getStringExtra("review_proposal_id")) }
         var inspecting by remember { mutableStateOf(false) }
+        var reviewOpened by remember { mutableStateOf(false) }
+        LaunchedEffect(reviewProposalId, proposal?.id, proposal?.status) {
+            if (!reviewOpened && reviewProposalId != null && proposal?.id == reviewProposalId && proposal?.status == "PENDING") {
+                reviewOpened = true
+                inspecting = true
+            }
+        }
         var typing by remember { mutableStateOf(false) }
         var text by remember { mutableStateOf("") }
         var hold by remember { mutableFloatStateOf(0f) }
@@ -145,8 +156,10 @@ class FullscreenActivity : ComponentActivity() {
         LaunchedEffect(session) { while (true) { left = Turns.leftMs(session) ?: -1L; delay(1000) } }
         LaunchedEffect(takenOver) { if (!takenOver) typing = false }
 
-        if (inspecting) LayoutInspectorPanel(lifecycle) { inspecting = false }
-        Box(Modifier.fillMaxSize().background(Color(0xFF07080D))) {
+        androidx.activity.compose.BackHandler(enabled = inspecting) { inspecting = false }
+        if (inspecting) {
+            LayoutInspectorPanel(lifecycle, initialProposalId = reviewProposalId, onMinimize = { finish() }) { inspecting = false }
+        } else Box(Modifier.fillMaxSize().background(Color(0xFF07080D))) {
             // The picture, fitted, with its border.
             BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(top = 56.dp, bottom = if (typing) 140.dp else 96.dp, start = 14.dp, end = 14.dp),
                 contentAlignment = Alignment.Center) {
@@ -218,8 +231,13 @@ class FullscreenActivity : ComponentActivity() {
                         Text(word, color = Color(0xCCFFFFFF), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                androidx.compose.material3.TextButton(onClick = { typing = false; inspecting = true }, enabled = s.displayId != null) {
-                    Text("布局", color = Color.White)
+                val pendingReview = proposal?.takeIf { it.status == "PENDING" && it.displayId == s.displayId && it.generation == s.generation }
+                androidx.compose.material3.TextButton(onClick = {
+                    typing = false
+                    reviewProposalId = pendingReview?.id
+                    inspecting = true
+                }, enabled = s.displayId != null) {
+                    Text(if (pendingReview != null) "待确认" else "布局", color = if (pendingReview != null) Color(0xFFFFBD68) else Color.White)
                 }
                 when (mode) {
                     Mode.ACTING, Mode.STANDBY -> Pill("停止 AI", Icons.Filled.Stop, Palette.stopped, Color.White) { BackgroundOperation.userStop() }

@@ -16,6 +16,9 @@ import com.kilon.agentvscreen.api.ApiServer
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.ui.MainActivity
 import com.kilon.agentvscreen.ui.Overlay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.delay
+import com.kilon.agentvscreen.cmd.InspectorProposals
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -43,6 +46,8 @@ class HostService : Service() {
         const val ACTION_SHOW_WINDOW = "com.kilon.agentvscreen.lab.SHOW_WINDOW"
         private const val STOP_CHANNEL = "agent_vscreen_stopped"
         private const val STOP_NOTE_ID = 7002
+        private const val REVIEW_CHANNEL = "atvsx_layout_review"
+        private const val REVIEW_NOTE_ID = 7003
 
         fun start(ctx: Context) {
             val i = Intent(ctx, HostService::class.java)
@@ -93,6 +98,20 @@ class HostService : Service() {
         Tailnet.sync(applicationContext)
         com.kilon.agentvscreen.core.VScreenPower.heal(applicationContext, "service start")
         // 1.1.6: the Stop lock and a hidden window are never silent: both live in the notification shade.
+        reviewWatch = scope.launch {
+            kotlinx.coroutines.flow.combine(InspectorProposals.state, Overlay.fullscreenVisible) { proposal, full -> proposal to full }
+                .collectLatest { (proposal, full) ->
+                    reviewNote(proposal?.takeIf { it.status == "PENDING" }?.id, full)
+                    val id = proposal?.id ?: return@collectLatest
+                    val remaining = InspectorProposals.remainingMs(id)
+                    if (remaining > 0L) delay(remaining)
+                    InspectorProposals.refreshPending()
+                }
+        }
+        reviewScreenWatch = scope.launch {
+            BackgroundOperation.state.map { Triple(it.displayId, it.generation, it.ownerSessionId) }.distinctUntilChanged()
+                .collect { InspectorProposals.refreshPending() }
+        }
         watch = scope.launch {
             kotlinx.coroutines.flow.combine(
                 BackgroundOperation.state.map { Triple(it.userStopped, it.windowHidden && it.displayId != null, it.stoppedAt) }.distinctUntilChanged(),
@@ -103,6 +122,28 @@ class HostService : Service() {
 
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
     private var watch: kotlinx.coroutines.Job? = null
+    private var reviewWatch: kotlinx.coroutines.Job? = null
+    private var reviewScreenWatch: kotlinx.coroutines.Job? = null
+    private var notifiedReview: String? = null
+
+    private fun reviewNote(id: String?, full: Boolean) {
+        val nm = getSystemService(NotificationManager::class.java) ?: return
+        if (id == null) { nm.cancel(REVIEW_NOTE_ID); notifiedReview = null; return }
+        if (full || notifiedReview == id || !nm.areNotificationsEnabled()) return
+        runCatching {
+            if (nm.getNotificationChannel(REVIEW_CHANNEL) == null) nm.createNotificationChannel(
+                NotificationChannel(REVIEW_CHANNEL, "布局建议待确认", NotificationManager.IMPORTANCE_HIGH))
+            val intent = Intent(this, com.kilon.agentvscreen.ui.FullscreenActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("review_proposal_id", id)
+            val open = PendingIntent.getActivity(this, REVIEW_NOTE_ID, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val n = NotificationCompat.Builder(this, REVIEW_CHANNEL).setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
+                .setContentTitle("ATVSX 有一项布局建议待确认").setContentText("点开查看，不会自动确认")
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setOnlyAlertOnce(true).setAutoCancel(true).setContentIntent(open).build()
+            nm.notify(REVIEW_NOTE_ID, n)
+            notifiedReview = id
+        }
+    }
+
 
     /**
      * A separate, visible notification while the user's Stop holds: the user may have pressed it (or closed the screen
@@ -160,6 +201,9 @@ class HostService : Service() {
 
     override fun onDestroy() {
         watch?.cancel()
+        reviewWatch?.cancel()
+        reviewScreenWatch?.cancel()
+        runCatching { getSystemService(NotificationManager::class.java)?.cancel(REVIEW_NOTE_ID) }
         Tailnet.stop()
         runCatching { getSystemService(NotificationManager::class.java)?.cancel(STOP_NOTE_ID) }
         Overlay.detach()

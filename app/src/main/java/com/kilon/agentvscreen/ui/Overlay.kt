@@ -94,6 +94,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import com.kilon.agentvscreen.cmd.InspectorProposals
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -156,6 +158,7 @@ object Overlay {
     /** Our full-screen page is in front: it shows the same picture, so the floating window steps aside. */
     private val fullscreenOpen = MutableStateFlow(false)
     fun fullscreenShown(open: Boolean) { fullscreenOpen.value = open }
+    internal val fullscreenVisible = fullscreenOpen.asStateFlow()
 
     fun attach(c: Context) {
         ctx = c.applicationContext
@@ -487,9 +490,10 @@ object Overlay {
         save()
     }
 
-    internal fun openFull() {
+    internal fun openFull(reviewId: String? = null) {
         val c = ctx ?: return
-        runCatching { c.startActivity(Intent(c, FullscreenActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        runCatching { c.startActivity(Intent(c, FullscreenActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .apply { if (reviewId != null) putExtra("review_proposal_id", reviewId) }) }
     }
 
     internal fun hitControl(x: Float, y: Float) = controls.values.any { it.contains(x, y) }
@@ -691,7 +695,11 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
                     Claim.HELD -> {}
                     Claim.NONE -> when {
                         onControl -> super.dispatchTouchEvent(ev)
-                        docked -> Overlay.undock()
+                        docked -> {
+                            InspectorProposals.refreshPending()
+                            val p = InspectorProposals.state.value
+                            if (p?.status == "PENDING") Overlay.openFull(p.id) else Overlay.undock()
+                        }
                         takenOver() && !onPill -> {
                             val p = pictureToScreen(downLocal.x, downLocal.y, Overlay.frameRect)
                             val owner = BackgroundOperation.state.value.ownerSessionId
@@ -742,7 +750,10 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
     val s = fixed ?: live
     val owner = s.ownerSessionId ?: return
     val mode = modeOf(s)
-    if (Overlay.docked.value) { DockTab(mode, Overlay.dockRight.value); return }
+    val proposal by InspectorProposals.state.collectAsState()
+    val review = proposal?.takeIf { it.status == "PENDING" && it.displayId == s.displayId && it.generation == s.generation }
+    val amber = Color(0xFFFFBD68)
+    if (Overlay.docked.value) { DockTab(mode, Overlay.dockRight.value, review != null); return }
     val density = LocalDensity.current
     val w = with(density) { Overlay.widthPx.floatValue.toDp() }
     val h = w / Overlay.aspect()
@@ -764,6 +775,7 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
         Box(Modifier.width(w).height(h).glowBorder(mode, corner, pad = PAD - 1.dp)) {
             Box(
                 Modifier.fillMaxSize().clip(RoundedCornerShape(corner)).background(Palette.ink)
+                    .then(if (review != null) Modifier.border(2.dp, amber, RoundedCornerShape(corner)) else Modifier)
                     .onGloballyPositioned { c -> val b = c.boundsInRoot(); Overlay.frameRect.set(b.left, b.top, b.right, b.bottom) },
             ) {
                 if (picture != null) picture(owner) else VScreenLiveFrame(owner, Modifier.fillMaxSize(), interactive = false)
@@ -786,7 +798,8 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
 
             // Buttons, top right: full screen, close. Same places in every state.
             Row(Modifier.align(Alignment.TopEnd).padding(end = (6 * k).dp, top = (6 * k).dp)) {
-                RoundBtn(Icons.Filled.OpenInFull, "全屏", Color(0xCC12141C), k, "full") { Overlay.openFull() }
+                RoundBtn(Icons.Filled.OpenInFull, if (review != null) "待确认 1 · 查看建议" else "全屏",
+                    if (review != null) Color(0xFFD78320) else Color(0xCC12141C), k, "full") { Overlay.openFull(review?.id) }
                 Spacer(Modifier.width((5 * k).dp))
                 RoundBtn(Icons.Filled.Close, if (mode == Mode.ACTING || mode == Mode.STANDBY || mode == Mode.TAKEOVER) "收起小窗" else "关闭副屏",
                     Color(0xCC12141C), k, "close") { Overlay.closeTapped() }
@@ -869,7 +882,7 @@ private fun RoundBtn(icon: ImageVector, desc: String, bg: Color, k: Float, key: 
  * colour as the big window (rainbow while the AI acts) — the app's own mark, so it reads as "the background screen".
  */
 @Composable
-private fun DockTab(mode: Mode, right: Boolean) {
+private fun DockTab(mode: Mode, right: Boolean, reviewPending: Boolean) {
     val shape = if (right) RoundedCornerShape(topStart = 30.dp, bottomStart = 30.dp) else RoundedCornerShape(topEnd = 30.dp, bottomEnd = 30.dp)
     val glass = listOf(Color(0xF0262A38), Color(0xF014161F))
     Box(
@@ -877,7 +890,7 @@ private fun DockTab(mode: Mode, right: Boolean) {
             .shadow(10.dp, shape)
             .clip(shape)
             .background(Brush.horizontalGradient(if (right) glass else glass.reversed()))
-            .border(1.dp, Color(0x2EFFFFFF), shape),
+            .border(if (reviewPending) 2.dp else 1.dp, if (reviewPending) Color(0xFFFFBD68) else Color(0x2EFFFFFF), shape),
         contentAlignment = Alignment.Center,
     ) {
         Box(

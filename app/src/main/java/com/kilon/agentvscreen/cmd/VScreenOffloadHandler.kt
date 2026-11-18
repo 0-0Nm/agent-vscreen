@@ -111,6 +111,8 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         标记副屏快照中的一个框，请用户在本机布局面板确认；不会点击或修改。
   layout-withdraw --id 建议ID
         撤回本会话待确认建议。
+  layout-wait --id 建议ID [--wait 30s]
+        等待本会话回执，收到处理即返回；每次最多30秒，超时不是同意。
   layout-review --id 建议ID
         读取本会话的确认回执，不会执行修改。
   devil-log [--lines N]
@@ -195,7 +197,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         if (sub == "help") return NativeOffloadResult(0, helpFor(argv.getOrNull(1)) + "\n")
         if (argv.drop(1).contains("--help")) return NativeOffloadResult(0, helpFor(sub) + "\n")
         val sid = request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION
-        if (sub !in setOf("devil-log", "layout-propose", "layout-review", "layout-withdraw")) takeAdjusted()
+        if (sub !in setOf("devil-log", "layout-propose", "layout-review", "layout-withdraw", "layout-wait")) takeAdjusted()
         return try {
             val rest = VScreenOptions.normalize(sub, argv.drop(1))
             checkOptions(sub, rest)
@@ -209,11 +211,19 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
                 if (lines != null && log.isEnabled()) data.put("tail", log.tail(lines))
                 return ok(args, data)
             }
-            if (sub in setOf("layout-propose", "layout-review", "layout-withdraw")) {
+            if (sub in setOf("layout-propose", "layout-review", "layout-withdraw", "layout-wait")) {
                 if (args.positional.isNotEmpty()) throw ActionError("INVALID_ARGS", "请按帮助使用命名参数")
                 if (sub != "layout-propose") {
                     val id = args.get("id") ?: throw ActionError("INVALID_ARGS", "缺少 --id")
-                    return ok(args, if (sub == "layout-review") InspectorProposals.read(sid,id) else InspectorProposals.withdraw(sid,id))
+                    return ok(args, when (sub) {
+                        "layout-wait" -> {
+                            val ms = args.getLong("wait") ?: 30_000L
+                            if (ms !in 1L..30_000L) throw ActionError("INVALID_ARGS", "--wait 必须在 1ms 到 30s 之间")
+                            InspectorProposals.await(sid, id, ms)
+                        }
+                        "layout-review" -> InspectorProposals.read(sid,id)
+                        else -> InspectorProposals.withdraw(sid,id)
+                    })
                 }
                 return ok(args, InspectorProposals.submit(sid,
                     args.get("snapshot") ?: throw ActionError("INVALID_ARGS", "缺少 --snapshot"),

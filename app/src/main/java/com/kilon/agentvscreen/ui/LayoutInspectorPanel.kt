@@ -8,10 +8,14 @@ import android.graphics.RectF
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -23,6 +27,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -58,8 +64,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.kilon.agentvscreen.cmd.InspectorProposals
@@ -83,7 +87,7 @@ import kotlin.math.roundToInt
 
 /** Full-screen, local-only inspector. The canvas owns the whole preview; tools are overlays. */
 @Composable
-internal fun LayoutInspectorPanel(lifecycle: Lifecycle, onClose: () -> Unit) {
+internal fun LayoutInspectorPanel(lifecycle: Lifecycle, initialProposalId: String? = null, onMinimize: () -> Unit, onClose: () -> Unit) {
     var ticket by remember { mutableStateOf<InspectorViewTicket?>(null) }
     var refresh by remember { mutableIntStateOf(0) }
     var snapshot by remember { mutableStateOf<LayoutSnapshot?>(null) }
@@ -105,6 +109,8 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, onClose: () -> Unit) {
     val proposal = proposalState?.takeIf { it.displayId == ticket?.displayId && it.generation == ticket?.generation }
     var toolSize by remember { mutableStateOf(IntSize.Zero) }
     var reviewBusy by remember { mutableStateOf(false) }
+    var autoReviewDone by remember(initialProposalId) { mutableStateOf(false) }
+    var toolDragging by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -208,6 +214,26 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, onClose: () -> Unit) {
         }
     }
 
+    LaunchedEffect(ticket, proposalState, initialProposalId) {
+        val t = ticket ?: return@LaunchedEffect
+        val p = proposalState ?: return@LaunchedEffect
+        if (autoReviewDone || initialProposalId == null || p.id != initialProposalId || p.status != "PENDING") return@LaunchedEffect
+        autoReviewDone = true
+        toolOpen = true
+        reviewBusy = true
+        val serial = ++requestSerial
+        val opened = withContext(Dispatchers.IO) { LayoutInspector.openProposalForLocal(p.reference, t) }
+        if (serial != requestSerial || ticket !== t) { reviewBusy = false; return@LaunchedEffect }
+        if (opened == null) { status = "AI 建议快照已过期或不匹配" } else {
+            snapshot = opened
+            selectedId = opened.boxes().firstOrNull { it.id + 1 == p.number }?.id
+            onlyClickable = false
+            zoom = 1f; pan = Offset.Zero
+            status = "历史线框 · ${p.reference} / ${p.number}号"
+        }
+        reviewBusy = false
+    }
+
     val boxes = remember(snap) { snap?.boxes().orEmpty() }
     val nodes = remember(snap) { snap?.data?.optJSONArray("nodes")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty() }
     val numbered = remember(nodes, boxes) {
@@ -224,16 +250,10 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, onClose: () -> Unit) {
     val currentReference = snap?.data?.optString("human_ref").orEmpty()
     val proposalMatches = proposal != null && proposal.status == "PENDING" && proposal.reference.equals(currentReference, true) && selected?.number == proposal.number
 
-    Dialog(onDismissRequest = ::closeOnce, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
-        Column(Modifier.fillMaxSize().background(Color(0xFF0B1018)).padding(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text("布局选框", color = Color.White, fontSize = 17.sp, modifier = Modifier.weight(1f))
-                TextButton(onClick = { refresh++ }, enabled = ticket != null && !capturing && !reviewBusy) { Text(if (capturing) "采集中" else "刷新") }
-                TextButton(onClick = { zoom = 1f; pan = Offset.Zero }) { Text("复位") }
-                TextButton(onClick = ::closeOnce) { Text("关闭") }
-            }
-            Text(status, color = Color(0xFF9CCBFF), fontSize = 12.sp)
-            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+    // This is an in-place inspector surface, not a Dialog: the preview keeps the same content bounds and owns all touch.
+    Box(Modifier.fillMaxSize().background(Color(0xFF0B1018))) {
+        Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
                 val canvasWidth = constraints.maxWidth.toFloat()
                 val canvasHeight = constraints.maxHeight.toFloat()
                 val availableWidth = maxWidth
@@ -243,28 +263,53 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, onClose: () -> Unit) {
                     Box(Modifier.fillMaxSize()) {
                         InspectorCanvas(s, filtered, selected?.box?.id, proposalMatches, zoom, pan,
                             { gestureZoom, gesturePan -> zoom = (zoom * gestureZoom).coerceIn(1f, 4f); pan += gesturePan },
-                            { id -> selectedId = id }, Modifier.fillMaxSize())
+                            { id -> selectedId = id }, Modifier.fillMaxSize().padding(top = 56.dp, bottom = 96.dp, start = 14.dp, end = 14.dp))
 
                         // Narrow edge handle and every tool card stay in this Box; canvas size never changes.
-                        Box(Modifier.align(Alignment.CenterEnd).width(22.dp).background(Color(0xCC1C2A3A)).clickable { toolOpen = !toolOpen }.padding(vertical = 20.dp)) {
-                            Text(if (proposal?.status == "PENDING") "●" else if (toolOpen) "›" else "‹", color = if (proposal?.status == "PENDING") Color.Yellow else Color.White, modifier = Modifier.align(Alignment.Center))
+                        Box(Modifier.align(Alignment.CenterEnd).width(28.dp).height(76.dp)
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp))
+                            .background(Color(0xE61C2A3A)).clickable { toolOpen = !toolOpen }) {
+                            Text(if (proposal?.status == "PENDING") "●" else if (toolOpen) "›" else "‹",
+                                color = if (proposal?.status == "PENDING") Color.Yellow else Color.White,
+                                modifier = Modifier.align(Alignment.Center))
                         }
                         if (toolOpen) {
-                            val cardWidth = minOf(292.dp, (availableWidth - 24.dp).coerceAtLeast(1.dp))
-                            val cardHeight = (availableHeight * 0.82f).coerceAtLeast(1.dp)
+                            val cardWidth = minOf(248.dp, (availableWidth - 30.dp).coerceAtLeast(1.dp))
+                            val cardHeight = (availableHeight * 0.47f).coerceAtLeast(1.dp)
                             val maxToolX = (canvasWidth - with(density) { (cardWidth + 24.dp).toPx() }).coerceAtLeast(0f)
-                            val maxToolY = (canvasHeight - toolSize.height).coerceAtLeast(0f)
-                            val position = Offset(toolOffset.x.coerceIn(0f,maxToolX), toolOffset.y.coerceIn(0f,maxToolY))
+                            val topToolY = with(density) { 48.dp.toPx() }.coerceAtMost(canvasHeight)
+                            val maxToolY = (canvasHeight - toolSize.height).coerceAtLeast(topToolY)
+                            val position = Offset(toolOffset.x.coerceIn(0f,maxToolX), toolOffset.y.coerceIn(topToolY,maxToolY))
                             Column(Modifier.offset { IntOffset(position.x.roundToInt(),position.y.roundToInt()) }
                                 .width(cardWidth).heightIn(max = cardHeight).onSizeChanged { toolSize = it }
-                                .background(Color(0xEE142131)).padding(8.dp)) {
-                                Row(Modifier.fillMaxWidth().pointerInput(maxToolX, maxToolY) {
-                                    detectDragGestures { change, drag ->
-                                        change.consume()
-                                        toolOffset = Offset((toolOffset.x + drag.x).coerceIn(0f,maxToolX), (toolOffset.y + drag.y).coerceIn(0f,maxToolY))
+                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                                .alpha(if (toolDragging) 0.66f else 1f).background(Color(0xEE142131))
+                                .padding(8.dp)) {
+                                Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.size(44.dp).pointerInput(maxToolX, topToolY, maxToolY) {
+                                        awaitEachGesture {
+                                            val down = awaitFirstDown()
+                                            down.consume()
+                                            try {
+                                                toolDragging = true
+                                                var previous = down.position
+                                                while (true) {
+                                                    val point = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                                    if (!point.pressed || point.isConsumed) break
+                                                    val delta = point.position - previous
+                                                    previous = point.position
+                                                    toolOffset = Offset((toolOffset.x + delta.x).coerceIn(0f,maxToolX),
+                                                        (toolOffset.y.coerceIn(topToolY,maxToolY) + delta.y).coerceIn(topToolY,maxToolY))
+                                                    point.consume()
+                                                }
+                                            } finally { toolDragging = false }
+                                        }
+                                    }, contentAlignment = Alignment.Center) {
+                                        Box(Modifier.size(20.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(if (toolDragging) Color(0xFFFFD45A) else Color(0xFF7295B7)))
                                     }
-                                }.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("拖动工具卡", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("工具卡", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
                                     Text("${data.optInt("display_id")}号副屏", color = Color(0xFF9DB2C6), fontSize = 11.sp)
                                 }
                                 Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
@@ -355,6 +400,13 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, onClose: () -> Unit) {
                     }
                 } ?: Spacer(Modifier.fillMaxSize())
             }
+            Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().background(Color(0xEE101521)).padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { ticket?.let { BackgroundOperation.endInspectorView(it) }; ticket = null; onMinimize() }) { Text("缩小") }
+                Text(status, color = Color(0xFF9CCBFF), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                TextButton(onClick = { refresh++ }, enabled = ticket != null && !capturing && !reviewBusy) { Text("刷新") }
+                TextButton(onClick = ::closeOnce) { Text("退出布局") }
+            }
         }
     }
 }
@@ -369,6 +421,12 @@ private data class InspectorNode(val node: JSONObject, val box: LayoutInspectorP
     )
 }
 
+private fun previewFit(w: Float, h: Float, sw: Int, sh: Int, zoom: Float, pan: Offset): LayoutInspectorViewport.Transform? {
+    if (w <= 0f || h <= 0f || sw <= 0 || sh <= 0 || !zoom.isFinite() || !pan.x.isFinite() || !pan.y.isFinite()) return null
+    val k = minOf(w / sw, h / sh) * zoom.coerceIn(1f, 4f)
+    return LayoutInspectorViewport.Transform((w-sw*k)/2f+pan.x, (h-sh*k)/2f+pan.y, k, sw, sh)
+}
+
 @Composable
 private fun InspectorCanvas(snapshot: LayoutSnapshot, nodes: List<InspectorNode>, selectedId: Int?, proposalSelected: Boolean, zoom: Float, pan: Offset, onTransform: (Float, Offset) -> Unit, onSelect: (Int) -> Unit, modifier: Modifier) {
     val sourceWidth = snapshot.data.optInt("input_width").coerceAtLeast(1)
@@ -381,18 +439,18 @@ private fun InspectorCanvas(snapshot: LayoutSnapshot, nodes: List<InspectorNode>
     }.pointerInput(snapshot, zoom, pan, nodes, wireframe) {
         detectTapGestures { point ->
             if (wireframe) {
-                val transform = LayoutInspectorViewport.fit(size.width.toFloat(), size.height.toFloat(), sourceWidth, sourceHeight, zoom, pan.x, pan.y)
+                val transform = previewFit(size.width.toFloat(), size.height.toFloat(), sourceWidth, sourceHeight, zoom, pan)
                 val source = transform?.source(point.x, point.y)
                 if (source != null) LayoutInspectorPolicy.hit(nodes.mapNotNull { it.box }, source.first, source.second)?.let(onSelect)
             }
         }
     }) {
-        val transform = LayoutInspectorViewport.fit(size.width, size.height, sourceWidth, sourceHeight, zoom, pan.x, pan.y) ?: return@Canvas
+        val transform = previewFit(size.width, size.height, sourceWidth, sourceHeight, zoom, pan) ?: return@Canvas
         val dst = RectF(transform.left, transform.top, transform.left + sourceWidth * transform.scale, transform.top + sourceHeight * transform.scale)
         val native = drawContext.canvas.nativeCanvas
         native.drawColor(Color(0xFF080C12).toArgb())
         native.save()
-        native.clipRect(34f, 26f, size.width - 8f, size.height - 8f)
+        native.clipRect(0f, 0f, size.width, size.height)
         if (bitmap != null && !bitmap.isRecycled) native.drawBitmap(bitmap, null, dst, paint)
         else {
             paint.color = Color(0xFF213344).toArgb(); paint.strokeWidth = 1f; paint.style = Paint.Style.STROKE
