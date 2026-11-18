@@ -297,15 +297,16 @@ class MainActivity : ComponentActivity() {
                     Column(Modifier.weight(1f)) {
                         Text(if (s.displayId == null) "还没有副屏" else Palette.word(mode), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                         Text(
-                            if (s.displayId == null) "agent 第一次 launch 时自动创建"
+                            if (s.displayId == null) "你可以手动打开副屏，再自己选择要看的应用"
                             else (s.agentTitle ?: "副屏 ${s.screenWidth}×${s.screenHeight} · 会话 ${s.ownerSessionId ?: "-"}"),
-                            color = Color(0xB3FFFFFF), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            color = Color(0xB3FFFFFF), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                         )
                     }
                     if (s.displayId != null) TextButton(onClick = { startActivity(Intent(this@MainActivity, FullscreenActivity::class.java)) }) {
                         Text("查看", color = Color.White)
                     }
                 }
+                ManualDisplayControls(activity = this@MainActivity, compact = true)
             }
         }
     }
@@ -318,6 +319,8 @@ class MainActivity : ComponentActivity() {
         var rawOpen by remember { mutableStateOf(false) }
         val ledger by com.kilon.agentvscreen.api.AgentLedger.snap.collectAsState()
         Block("接入 agent") {
+            // Human manual-display controls stay visible for every connection mode and never expose a token.
+            ManualDisplayControls(activity = this@MainActivity)
             val tabs = listOf("命令行", "MCP", "HTTP")
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 tabs.forEachIndexed { i, t ->

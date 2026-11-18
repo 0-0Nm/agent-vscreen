@@ -472,6 +472,104 @@ object BackgroundOperation {
         Unit
     }
 
+    // Local manual creation has its own lifetime, not a synthetic AI task.
+    private const val MANUAL_DISPLAY_OWNER = "atvsx-local-human"
+    private var manualView: InspectorViewTicket? = null
+    internal fun manuallyOpened(): Boolean = synchronized(lock) {
+        val ticket = manualView ?: return@synchronized false
+        _state.value.ownerSessionId == MANUAL_DISPLAY_OWNER && isInspectorViewValid(ticket)
+    }
+    /** Explicit native button only; not exposed through the MCP command table. */
+    internal fun openManualDisplay(): Int = synchronized(inspectorUseLock) {
+        synchronized(lock) manualOpen@ {
+            when (ManualDisplayPolicy.open(_state.value.enabled, _state.value.connection == Connection.READY, display?.released == false)) {
+                ManualDisplayPolicy.Decision.SERVICE_OFF -> throw ActionError("DISABLED", "请先在首页启动 ATVSX 服务")
+                ManualDisplayPolicy.Decision.NOT_CONNECTED -> throw ActionError("NOT_CONNECTED", "请先连接 Shizuku；无需连接 AI 或 MCP")
+                ManualDisplayPolicy.Decision.REUSE -> {
+                    val current = display!!
+                    val owner = _state.value.ownerSessionId
+                    val ticket = beginInspectorView()
+                    try {
+                        if (VScreenShell.topPackage(current.displayId) != null) prepareInspectorView(ticket)
+                        else {
+                            if (current.parked) unpark(current)
+                            VScreenAwake.ensure(current)
+                        }
+                    } finally { endInspectorView(ticket) }
+                    if (!ManualDisplayPolicy.showExisting(display === current && !current.released, _state.value.ownerSessionId != owner))
+                        throw ActionError("STALE_SCREEN", "副屏已变化，请重试")
+                    _state.update { it.copy(windowHidden = false, showPreview = true) }
+                    return@manualOpen current.displayId
+                }
+                ManualDisplayPolicy.Decision.CREATE -> Unit
+            }
+            val (w, h, dpi) = screenSizeFor(ctx())
+            val d = VScreenDisplay.create(ctx(), "atvsx-manual-display", w, h, dpi).getOrElse {
+                throw ActionError("CREATE_FAILED", it.message ?: "创建副屏失败，请检查 Shizuku 连接")
+            }
+            // Never use an untrusted fallback for local application launching.
+            if (!d.shellOwned || d.displayId <= 0) {
+                d.release()
+                throw ActionError("UNTRUSTED_DISPLAY", "未能创建受信任副屏；不会改为打开主屏")
+            }
+            display = d
+            setupGeometry(d)
+            rememberHostPid()
+            _state.update { it.copy(displayId = d.displayId, generation = d.generation, ownerSessionId = MANUAL_DISPLAY_OWNER,
+                idle = true, windowHidden = false, showPreview = true, powerSaving = false, note = "手动副屏已打开，请选择应用；AI 停止状态不变") }
+            manualView = beginInspectorView()
+            runCatching { VScreenShell.hideImeOn(ctx(), d.displayId) }
+            VScreenAwake.kick("用户手动打开副屏")
+            d.displayId
+        }
+    }
+    private fun manualTicketForManagement(): InspectorViewTicket = synchronized(lock) {
+        val ticket = manualView ?: throw ActionError("NOT_MANUAL_DISPLAY", "当前副屏不属于手动入口，只能查看，不能改动原会话")
+        val owner = _state.value.ownerSessionId
+        if (!ManualDisplayPolicy.mayManage(owner == MANUAL_DISPLAY_OWNER, isInspectorViewValid(ticket),
+                owner != null && tasks.containsKey(owner), _state.value.takeoverSessionId != null))
+            throw ActionError("BUSY", "副屏正在使用或已变化，不能在这里切换应用或关闭")
+        ticket
+    }
+    internal fun launchManualApp(packageName: String) = synchronized(inspectorUseLock) {
+        val ticket = manualTicketForManagement()
+        val clean = packageName.trim()
+        if (!Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+").matches(clean)) throw ActionError("INVALID_ARGS", "应用包名不合法")
+        if (clean == ctx().packageName || clean == "android" || clean == "com.android.systemui")
+            throw ActionError("INVALID_APP", "该包不是允许在此打开的普通应用入口")
+        if (ctx().packageManager.getLaunchIntentForPackage(clean) == null)
+            throw ActionError("APP_NOT_FOUND", "没有找到该应用的桌面启动入口")
+        if (VScreenStore.ruleFor(clean) == VScreenStore.Rule.BLOCK) throw ActionError("APP_BLOCKED", "该应用被你禁止在副屏读取或操作")
+        withInspectorDisplay(ticket) { d ->
+            if (d.parked) unpark(d)
+            if (!isInspectorViewValid(ticket)) throw ActionError("STALE_SCREEN", "副屏已关闭")
+            VScreenAwake.ensure(d)
+            if (!d.shellOwned || d.displayId <= 0) throw ActionError("INVALID_DISPLAY", "只能在受信任的自有副屏打开应用")
+            val result = VScreenShell.launch(d.displayId, clean, null, VScreenShell.LaunchMode.ROOT)
+            if (!result.ok) throw ActionError(result.code, result.message)
+            val landed = VScreenShell.topPackage(d.displayId)
+            val message = if (landed == clean) "已在副屏打开应用"
+                else if (landed == null) "启动请求已发送，尚未确认画面；请查看副屏，勿连续重复启动"
+                else throw ActionError("LAUNCH_NOT_ON_TOP", "应用尚未在副屏顶部显示，请查看当前页面")
+            _state.update { it.copy(note = message) }
+            message
+        }
+    }
+    internal fun closeManualDisplay() = synchronized(inspectorUseLock) {
+        manualTicketForManagement()
+        releaseScreen("用户关闭了手动副屏")
+    }
+    /** Keep its page but let a subsequent explicit agent request acquire the idle screen. Stop remains stopped. */
+    internal fun yieldManualDisplay() = synchronized(inspectorUseLock) {
+        synchronized(lock) {
+            val ticket = manualTicketForManagement()
+            manualView = null
+            endInspectorView(ticket)
+            _state.update { it.copy(idle = true, note = "页面已保留，等待 AI 下一次明确接手；停止状态不变") }
+            scheduleIdleRelease(); scheduleIdlePark()
+        }
+    }
+
     /** v0.5: work is pending on the background screen — the owner's chat turn is running, or a watch holds it. */
     fun needsAwake(): Boolean {
         val d = display ?: return false
@@ -510,6 +608,7 @@ object BackgroundOperation {
             val owner = _state.value.ownerSessionId
             if (onlyIfIdle && (!_state.value.idle || holds > 0 || (owner != null && tasks.containsKey(owner)) || inspectorViews.active(cur.displayId, cur.generation, owner))) return
             inspectorViews.clear()
+            manualView = null
             display = null
             cur
         }
@@ -712,6 +811,8 @@ object BackgroundOperation {
             val cur = display
             val s = _state.value
             if (cur != null && !cur.released) {
+                if (manuallyOpened()) throw ActionError("BUSY", "用户正在手动使用副屏；请用户在 ATVSX 点击“保留页面并交给 AI”后再接手")
+                if (s.takeoverSessionId != null && s.ownerSessionId != sid) throw busy(s.ownerSessionId)
                 if (s.ownerSessionId == sid) {
                     cancelIdleRelease()
                     if (s.idle) _state.update { it.copy(idle = false) }
