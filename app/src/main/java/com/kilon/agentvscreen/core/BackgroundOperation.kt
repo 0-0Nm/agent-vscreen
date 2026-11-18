@@ -479,9 +479,32 @@ object BackgroundOperation {
         val ticket = manualView ?: return@synchronized false
         _state.value.ownerSessionId == MANUAL_DISPLAY_OWNER && isInspectorViewValid(ticket)
     }
+    private fun requireDisplayConnection(explicitLocal: Boolean) {
+        val state = _state.value
+        if (!state.enabled) throw ActionError("DISABLED", "请先在首页启动 ATVSX 服务")
+        if (state.connection == Connection.READY) return
+        if (!explicitLocal && state.needsExplicitReconnect && state.connection == Connection.DISCONNECTED)
+            throw ActionError("NOT_CONNECTED", "连接已停止，请在 ATVSX 本机重新连接")
+        val after = connect()
+        if (after.connection != Connection.READY)
+            throw ActionError("NOT_CONNECTED", after.connectionError ?: "副屏连接未就绪")
+    }
+
     /** Explicit native button only; not exposed through the MCP command table. */
     internal fun openManualDisplay(): Int = synchronized(inspectorUseLock) {
-        synchronized(lock) manualOpen@ {
+        manualStage(com.kilon.agentvscreen.host.DevilLog.Event.MANUAL_CONNECT) { requireDisplayConnection(explicitLocal = true) }
+        manualStage(com.kilon.agentvscreen.host.DevilLog.Event.MANUAL_OPEN) { openConnectedManualDisplay() }
+    }
+    private inline fun <T> manualStage(event: com.kilon.agentvscreen.host.DevilLog.Event, block: () -> T): T = try {
+        block().also { com.kilon.agentvscreen.host.DevilLog.record(event, 1L) }
+    } catch (e: Exception) {
+        com.kilon.agentvscreen.host.DevilLog.record(event, 0L)
+        throw e
+    }
+    private fun openConnectedManualDisplay(emptyGeneration: Long? = null): Int {
+        return synchronized(lock) manualOpen@ {
+            if (emptyGeneration != null && !ManualDisplayPolicy.matchesPicker(null, emptyGeneration, _state.value.displayId, _state.value.generation))
+                throw ActionError("STALE_SCREEN", "已出现其他副屏，请重新选择应用")
             when (ManualDisplayPolicy.open(_state.value.enabled, _state.value.connection == Connection.READY, display?.released == false)) {
                 ManualDisplayPolicy.Decision.SERVICE_OFF -> throw ActionError("DISABLED", "请先在首页启动 ATVSX 服务")
                 ManualDisplayPolicy.Decision.NOT_CONNECTED -> throw ActionError("NOT_CONNECTED", "请先连接 Shizuku；无需连接 AI 或 MCP")
@@ -508,7 +531,7 @@ object BackgroundOperation {
                 throw ActionError("CREATE_FAILED", it.message ?: "创建副屏失败，请检查 Shizuku 连接")
             }
             // Never use an untrusted fallback for local application launching.
-            if (!d.shellOwned || d.displayId <= 0) {
+            if (!d.shellOwned || !d.trusted || d.displayId <= 0) {
                 d.release()
                 throw ActionError("UNTRUSTED_DISPLAY", "未能创建受信任副屏；不会改为打开主屏")
             }
@@ -531,8 +554,14 @@ object BackgroundOperation {
             throw ActionError("BUSY", "副屏正在使用或已变化，不能在这里切换应用或关闭")
         ticket
     }
-    internal fun launchManualApp(packageName: String) = synchronized(inspectorUseLock) {
-        val ticket = manualTicketForManagement()
+    /** A picker is bound to the screen it was opened for, or to the absence of a screen. */
+    internal fun launchManualApp(packageName: String, expectedDisplay: Int?, expectedGeneration: Long): String =
+        synchronized(inspectorUseLock) {
+            manualStage(com.kilon.agentvscreen.host.DevilLog.Event.MANUAL_APP) {
+                launchPickedApp(packageName, expectedDisplay, expectedGeneration)
+            }
+        }
+    private fun launchPickedApp(packageName: String, expectedDisplay: Int?, expectedGeneration: Long): String {
         val clean = packageName.trim()
         if (!Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+").matches(clean)) throw ActionError("INVALID_ARGS", "应用包名不合法")
         if (clean == ctx().packageName || clean == "android" || clean == "com.android.systemui")
@@ -540,20 +569,36 @@ object BackgroundOperation {
         if (ctx().packageManager.getLaunchIntentForPackage(clean) == null)
             throw ActionError("APP_NOT_FOUND", "没有找到该应用的桌面启动入口")
         if (VScreenStore.ruleFor(clean) == VScreenStore.Rule.BLOCK) throw ActionError("APP_BLOCKED", "该应用被你禁止在副屏读取或操作")
-        withInspectorDisplay(ticket) { d ->
-            if (d.parked) unpark(d)
-            if (!isInspectorViewValid(ticket)) throw ActionError("STALE_SCREEN", "副屏已关闭")
-            VScreenAwake.ensure(d)
-            if (!d.shellOwned || d.displayId <= 0) throw ActionError("INVALID_DISPLAY", "只能在受信任的自有副屏打开应用")
-            val result = VScreenShell.launch(d.displayId, clean, null, VScreenShell.LaunchMode.ROOT)
-            if (!result.ok) throw ActionError(result.code, result.message)
-            val landed = VScreenShell.topPackage(d.displayId)
-            val message = if (landed == clean) "已在副屏打开应用"
-                else if (landed == null) "启动请求已发送，尚未确认画面；请查看副屏，勿连续重复启动"
-                else throw ActionError("LAUNCH_NOT_ON_TOP", "应用尚未在副屏顶部显示，请查看当前页面")
-            _state.update { it.copy(note = message) }
-            message
+        val initial = _state.value
+        if (!ManualDisplayPolicy.matchesPicker(expectedDisplay, expectedGeneration, initial.displayId, initial.generation))
+            throw ActionError("STALE_SCREEN", "副屏已变化，请重新选择应用")
+        if (expectedDisplay == null) {
+            manualStage(com.kilon.agentvscreen.host.DevilLog.Event.MANUAL_CONNECT) { requireDisplayConnection(explicitLocal = true) }
+            manualStage(com.kilon.agentvscreen.host.DevilLog.Event.MANUAL_OPEN) { openConnectedManualDisplay(expectedGeneration) }
         }
+        val current = _state.value
+        val d = currentDisplay() ?: throw ActionError("NO_DISPLAY", "副屏已关闭")
+        fun maySwitch(): Boolean {
+            val st = _state.value
+            return currentDisplay() === d && ManualDisplayPolicy.matchesPicker(d.displayId, d.generation, st.displayId, st.generation) &&
+                ManualDisplayPolicy.maySwitch(manuallyOpened(), st.ownerSessionId, st.takeoverSessionId)
+        }
+        if (!maySwitch()) throw ActionError("USER_TAKEOVER_REQUIRED", "请先接管当前副屏，再切换应用")
+        if (!d.shellOwned || !d.trusted || d.displayId <= 0)
+            throw ActionError("INVALID_DISPLAY", "只能在受信任副屏打开应用")
+        val ticket = beginInspectorView()
+        try {
+            if (d.parked) unpark(d)
+            VScreenAwake.ensure(d)
+            if (!maySwitch() || !isInspectorViewValid(ticket)) throw ActionError("STALE_SCREEN", "副屏或接管状态已变化")
+            com.kilon.agentvscreen.cmd.InspectorProposals.invalidateDisplay(d.displayId, d.generation)
+            val result = VScreenShell.launch(d.displayId, clean, null, VScreenShell.LaunchMode.KEEP)
+            if (!result.ok) throw ActionError(result.code, result.message)
+            val message = if (VScreenShell.topPackage(d.displayId) == clean) "已在副屏打开应用"
+                else "启动请求已发送，尚未确认应用在副屏显示，请查看副屏"
+            _state.update { if (it.displayId == current.displayId && it.generation == current.generation) it.copy(note = message) else it }
+            return message
+        } finally { endInspectorView(ticket) }
     }
     internal fun closeManualDisplay() = synchronized(inspectorUseLock) {
         manualTicketForManagement()
@@ -791,22 +836,7 @@ object BackgroundOperation {
     private fun acquireInner(sessionId: String?, create: Boolean, landscape: Boolean?, scale: Double): VScreenDisplay {
         val sid = sessionId?.takeIf { it.isNotEmpty() }
             ?: throw ActionError("NO_SESSION", "没有会话（请求头 X-VScreen-Session）")
-        val s0 = _state.value
-        if (!s0.enabled) throw ActionError("DISABLED", "ATVSX 的服务已被用户关闭。请用户打开 ATVSX 点“启动服务”")
-        if (s0.connection != Connection.READY) {
-            // Standalone: only the user's own 停止并释放 needs the user; a lost Shizuku that came back reconnects here.
-            if (s0.needsExplicitReconnect && s0.connection == Connection.DISCONNECTED) {
-                throw ActionError(
-                    "NOT_CONNECTED",
-                    "后台连接未就绪（${s0.connectionError ?: "需要明确重连"}）。请用户打开 ATVSX 点“连接”，或执行 vscreen fix not_connected。不会改为在主屏操作。",
-                )
-            }
-            // Enabled, never connected and never stopped: verify the channel once.
-            val after = connect()
-            if (after.connection != Connection.READY) {
-                throw ActionError("NOT_CONNECTED", "后台连接失败：${after.connectionError}。不会改为在主屏操作。")
-            }
-        }
+        requireDisplayConnection(explicitLocal = false)
         synchronized(lock) {
             val cur = display
             val s = _state.value

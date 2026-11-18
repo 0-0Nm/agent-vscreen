@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
 
 /** Separate opt-in stream; event payloads must never contain application content. */
 internal object DevilLog {
-    enum class Event { CREATED, ADOPTED, PARK, RESUME, RELEASE, ACQUIRE_FAILURE, CONVERT_FAILURE, WAKE, LAYOUT }
+    enum class Event { CREATED, ADOPTED, PARK, RESUME, RELEASE, ACQUIRE_FAILURE, CONVERT_FAILURE, WAKE, LAYOUT, MANUAL_CONNECT, MANUAL_OPEN, MANUAL_APP }
     enum class Alignment { PAGE_CHANGED, SENSITIVE_CONTENT, TREE_TRUNCATED, NO_FRAME, DISPLAY_NOT_ON, COORDINATE_SPACE_MISMATCH, CACHED_FRAME, FRAME_CHANGED_DURING_CAPTURE, BEST_EFFORT, MIXED_WINDOWS, NO_FRAME_COPY, UNKNOWN }
     enum class Failure { STATE, ARGUMENT, SECURITY, MEMORY, OTHER }
     private val gate = Any()

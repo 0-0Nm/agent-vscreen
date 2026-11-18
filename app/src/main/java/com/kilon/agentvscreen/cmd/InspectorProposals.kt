@@ -30,6 +30,11 @@ internal object InspectorProposals {
             BackgroundOperation.state.value.let { it.displayId == p.displayId && it.generation == p.generation && it.ownerSessionId == e.owner })
         return if (status != "PENDING") e.copy(proposal = p.copy(status = status)).also(::publish) else e
     }
+    fun invalidateDisplay(displayId: Int, generation: Long) = synchronized(lock) {
+        val e = current ?: return@synchronized
+        if (e.proposal.status == "PENDING" && e.proposal.displayId == displayId && e.proposal.generation == generation)
+            publish(e.copy(proposal = e.proposal.copy(status = "STALE")))
+    }
     fun refreshPending() = synchronized(lock) { current?.let(::reconcile); Unit }
     fun remainingMs(id: String): Long = synchronized(lock) {
         val e = current?.takeIf { it.proposal.id == id && it.proposal.status == "PENDING" } ?: return@synchronized 0L

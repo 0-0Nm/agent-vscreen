@@ -12,4 +12,7 @@ internal object ManualDisplayPolicy {
     fun mayManage(manual: Boolean, currentGeneration: Boolean, activeAi: Boolean, takeover: Boolean): Boolean =
         manual && currentGeneration && !activeAi && !takeover
     fun showExisting(liveDisplay: Boolean, ownerChanged: Boolean): Boolean = liveDisplay && !ownerChanged
+    fun maySwitch(manual: Boolean, owner: String?, takeover: String?): Boolean = manual || (owner != null && owner == takeover)
+    fun matchesPicker(expected: Int?, generation: Long, current: Int?, currentGeneration: Long): Boolean =
+        expected == current && generation == currentGeneration
 }

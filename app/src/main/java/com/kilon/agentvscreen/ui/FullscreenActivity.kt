@@ -231,6 +231,7 @@ class FullscreenActivity : ComponentActivity() {
                         Text(word, color = Color(0xCCFFFFFF), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
+                Box(Modifier.width(76.dp)) { ManualDisplayControls(this@FullscreenActivity, compact = true, switchOnly = true) }
                 val pendingReview = proposal?.takeIf { it.status == "PENDING" && it.displayId == s.displayId && it.generation == s.generation }
                 androidx.compose.material3.TextButton(onClick = {
                     typing = false

@@ -42,6 +42,7 @@ import kotlinx.coroutines.withContext
 internal fun ManualDisplayControls(
     activity: ComponentActivity,
     compact: Boolean = false,
+    switchOnly: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -78,17 +79,11 @@ internal fun ManualDisplayControls(
         }
     }
 
-    fun openManualDisplay() {
-        runIo(
-            action = { BackgroundOperation.openManualDisplay() },
-            success = { id ->
-                Toast.makeText(context, "副屏已打开（$id），可手动选应用", Toast.LENGTH_SHORT).show()
-            },
-        )
-    }
+    var pickerTarget by remember { mutableStateOf<Pair<Int?, Long>?>(null) }
 
     fun loadApps() {
         if (loadingApps || busy) return
+        pickerTarget = state.displayId to state.generation
         loadingApps = true
         error = null
         scope.launch {
@@ -104,8 +99,9 @@ internal fun ManualDisplayControls(
     }
 
     fun launch(app: LaunchableApp) {
+        val target = pickerTarget ?: return
         runIo(
-            action = { BackgroundOperation.launchManualApp(app.packageName) },
+            action = { BackgroundOperation.launchManualApp(app.packageName, target.first, target.second) },
             success = { message: String -> chooserOpen = false; Toast.makeText(context, message, Toast.LENGTH_LONG).show() },
         )
     }
@@ -122,6 +118,12 @@ internal fun ManualDisplayControls(
         verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 10.dp),
     ) {
         when {
+            switchOnly -> {
+                val canSwitch = com.kilon.agentvscreen.core.ManualDisplayPolicy.maySwitch(manualOwn, state.ownerSessionId, state.takeoverSessionId)
+                TextButton(onClick = {
+                    if (canSwitch) loadApps() else Toast.makeText(context, "先点接管，再换应用", Toast.LENGTH_SHORT).show()
+                }, enabled = !busy && !loadingApps && hasDisplay) { Text("换应用") }
+            }
             aiOwnedDisplay -> {
                 Text(
                     "已有副屏会保留原页面和会话。这里可以唤起查看，不抢占、切换应用或关闭。",
@@ -138,16 +140,16 @@ internal fun ManualDisplayControls(
                 if (!compact) {
                     Text(
                         if (manualOwn) "这是你手动打开并持有的副屏。可选应用，或只在确认后关闭副屏生命周期。"
-                        else "没有副屏时，你可以手动打开一个独立副屏；不会自动启动应用，也不会替你处理权限或登录。",
+                        else "先选应用，ATVSX 再连接并打开副屏；取消选择不建屏。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 if (!hasDisplay) {
                     Button(
-                        onClick = ::openManualDisplay,
+                        onClick = ::loadApps,
                         enabled = !busy,
                         modifier = Modifier.fillMaxWidth(),
-                    ) { ButtonLabel(if (busy) "正在打开副屏…" else "⏻ 一键打开副屏", busy) }
+                    ) { ButtonLabel(if (busy) "正在打开副屏…" else "选应用打开副屏", busy) }
                 } else {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = ::loadApps, enabled = !busy && !loadingApps, modifier = Modifier.weight(1f)) {
@@ -172,7 +174,7 @@ internal fun ManualDisplayControls(
                 }
             }
         }
-        error?.let { Text("错误：$it", color = MaterialTheme.colorScheme.error) }
+        if (!switchOnly && !chooserOpen) error?.let { Text("错误：$it", color = MaterialTheme.colorScheme.error) }
     }
 
     if (chooserOpen) {
@@ -184,6 +186,7 @@ internal fun ManualDisplayControls(
             title = { Text("选择要在副屏打开的应用") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     OutlinedTextField(
                         value = search,
                         onValueChange = { search = it },
