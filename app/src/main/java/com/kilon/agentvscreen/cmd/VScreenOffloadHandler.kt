@@ -107,6 +107,12 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         立即释放副屏
   handoff in [包名] | handoff out [包名] [--note 说明]
         in：把用户主屏上的应用移到副屏接着做（返回四段）；out：交还到主屏，需要用户本人操作时用
+  layout-propose --snapshot L-编号 --node N --change 修改建议
+        标记副屏快照中的一个框，请用户在本机布局面板确认；不会点击或修改。
+  layout-withdraw --id 建议ID
+        撤回本会话待确认建议。
+  layout-review --id 建议ID
+        读取本会话的确认回执，不会执行修改。
   devil-log [--lines N]
         查看详细日志状态；开启时可读最近 1..100 行，仅能在本机诊断页开关。
   status
@@ -189,7 +195,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         if (sub == "help") return NativeOffloadResult(0, helpFor(argv.getOrNull(1)) + "\n")
         if (argv.drop(1).contains("--help")) return NativeOffloadResult(0, helpFor(sub) + "\n")
         val sid = request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION
-        if (sub != "devil-log") takeAdjusted()
+        if (sub !in setOf("devil-log", "layout-propose", "layout-review", "layout-withdraw")) takeAdjusted()
         return try {
             val rest = VScreenOptions.normalize(sub, argv.drop(1))
             checkOptions(sub, rest)
@@ -202,6 +208,17 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
                 val data = JSONObject().put("enabled", log.isEnabled()).put("local_toggle_only", true)
                 if (lines != null && log.isEnabled()) data.put("tail", log.tail(lines))
                 return ok(args, data)
+            }
+            if (sub in setOf("layout-propose", "layout-review", "layout-withdraw")) {
+                if (args.positional.isNotEmpty()) throw ActionError("INVALID_ARGS", "请按帮助使用命名参数")
+                if (sub != "layout-propose") {
+                    val id = args.get("id") ?: throw ActionError("INVALID_ARGS", "缺少 --id")
+                    return ok(args, if (sub == "layout-review") InspectorProposals.read(sid,id) else InspectorProposals.withdraw(sid,id))
+                }
+                return ok(args, InspectorProposals.submit(sid,
+                    args.get("snapshot") ?: throw ActionError("INVALID_ARGS", "缺少 --snapshot"),
+                    args.getInt("node") ?: throw ActionError("INVALID_ARGS", "缺少 --node"),
+                    args.get("change") ?: throw ActionError("INVALID_ARGS", "缺少 --change")))
             }
             BackgroundOperation.refreshStatus()
             enforceRules(sub)

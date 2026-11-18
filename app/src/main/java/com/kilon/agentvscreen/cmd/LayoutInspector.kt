@@ -74,6 +74,38 @@ internal object LayoutInspector {
             LayoutSnapshot(JSONObject(data.toString()).put("referenced_snapshot", true).put("historical", true), null)
         }
     }
+    /** For local review only: matching scoped tree, no cached picture or pixel claim. */
+    fun openProposalForLocal(reference: String, ticket: InspectorViewTicket): LayoutSnapshot? =
+        runCatching { BackgroundOperation.withInspectorDisplay(ticket) { d ->
+            val pair = synchronized(retained) { retained[reference] } ?: return@withInspectorDisplay null
+            if (!ReviewGate.within(pair.first, SystemClock.elapsedRealtime(), 10 * 60_000L)) return@withInspectorDisplay null
+            val data = pair.second.data
+            val pkg = data.getString("targetPackage")
+            if (data.getInt("display_id") != d.displayId || data.getLong("generation") != d.generation ||
+                data.optBoolean("contains_password") || VScreenStore.ruleFor(pkg) == VScreenStore.Rule.BLOCK ||
+                VScreenShell.topPackage(d.displayId) != pkg || VScreenShell.topActivity(d.displayId) != data.optString("activity") ||
+                d.inputWidth != data.optInt("input_width") || d.inputHeight != data.optInt("input_height") ||
+                d.rotation * 90 != data.optInt("rotation") || d.bufferTurn != data.optInt("frame_turn") ||
+                !BackgroundOperation.isInspectorViewValid(ticket)) return@withInspectorDisplay null
+            LayoutSnapshot(JSONObject(data.toString()).put("historical",true).put("boxes_enabled",false)
+                .put("screenshot_suppressed",true).put("alignment","NO_FRAME"), null)
+        } }.getOrNull()
+
+    /** Includes screen geometry and the entire bounded tree. Never prints or persists this identity. */
+    fun reviewFingerprint(data: JSONObject, number: Int): String? {
+        if (!data.optBoolean("available") || data.optBoolean("truncated") || data.optBoolean("contains_password") ||
+            !data.optBoolean("wireframe_enabled") || data.isNull("activity")) return null
+        val nodes = data.optJSONArray("nodes") ?: return null
+        val node = (0 until nodes.length()).asSequence().map { nodes.getJSONObject(it) }
+            .firstOrNull { it.optInt("number") == number && it.optBoolean("visible") && !it.optBoolean("password") } ?: return null
+        val bounds = node.optJSONObject("bounds") ?: return null
+        if (bounds.optInt("right") <= bounds.optInt("left") || bounds.optInt("bottom") <= bounds.optInt("top")) return null
+        val ids = listOf("display_id","generation","targetPackage","activity","width","height","input_width","input_height","rotation","frame_turn")
+        val payload = org.json.JSONArray().apply { ids.forEach { put(data.opt(it)) }; put(number); put(nodes) }.toString()
+        // Digest uses process-local comparisons only; no node content goes into a receipt.
+        return java.security.MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+    }
     private fun captureExisting(d: VScreenDisplay, maxNodes: Int, maxDepth: Int, stillAllowed: () -> Boolean): LayoutSnapshot {
             if (d.displayId <= 0) throw ActionError("INVALID_DISPLAY", "布局检查器只允许自有副屏")
             val start = SystemClock.elapsedRealtime()
