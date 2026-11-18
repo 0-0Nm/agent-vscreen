@@ -236,6 +236,8 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, onClose: () -> Unit) {
             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                 val canvasWidth = constraints.maxWidth.toFloat()
                 val canvasHeight = constraints.maxHeight.toFloat()
+                val availableWidth = maxWidth
+                val availableHeight = maxHeight
                 snap?.takeIf { it.data.optBoolean("available") }?.let { s ->
                     val data = s.data
                     Box(Modifier.fillMaxSize()) {
@@ -248,8 +250,8 @@ internal fun LayoutInspectorPanel(lifecycle: Lifecycle, onClose: () -> Unit) {
                             Text(if (proposal?.status == "PENDING") "●" else if (toolOpen) "›" else "‹", color = if (proposal?.status == "PENDING") Color.Yellow else Color.White, modifier = Modifier.align(Alignment.Center))
                         }
                         if (toolOpen) {
-                            val cardWidth = minOf(292.dp, (maxWidth - 24.dp).coerceAtLeast(1.dp))
-                            val cardHeight = (maxHeight * 0.82f).coerceAtLeast(1.dp)
+                            val cardWidth = minOf(292.dp, (availableWidth - 24.dp).coerceAtLeast(1.dp))
+                            val cardHeight = (availableHeight * 0.82f).coerceAtLeast(1.dp)
                             val maxToolX = (canvasWidth - with(density) { (cardWidth + 24.dp).toPx() }).coerceAtLeast(0f)
                             val maxToolY = (canvasHeight - toolSize.height).coerceAtLeast(0f)
                             val position = Offset(toolOffset.x.coerceIn(0f,maxToolX), toolOffset.y.coerceIn(0f,maxToolY))
