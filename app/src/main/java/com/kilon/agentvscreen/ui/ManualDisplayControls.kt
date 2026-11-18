@@ -239,7 +239,7 @@ private fun queryLaunchableApps(context: Context): List<LaunchableApp> {
             LaunchableApp(label, pkg)
         }
         .distinctBy { it.packageName }
-        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.label }.thenBy { it.packageName })
+        .sortedWith(compareBy<LaunchableApp> { it.label.lowercase(java.util.Locale.ROOT) }.thenBy { it.packageName })
         .toList()
 }
 
